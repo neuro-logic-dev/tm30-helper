@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>TM30</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --border: #e1e4e8;
+    --text: #1f2328;
+    --muted: #656d76;
+    --accent: #2563eb;
+    --accent-soft: #eff4ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .browser-chrome {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: #fafbfc;
+    flex: 0 0 auto;
+  }
+  .nav-btns { display: flex; gap: 4px; }
+  .nav-btns button {
+    border: none;
+    background: transparent;
+    font-size: 15px;
+    color: var(--muted);
+    cursor: pointer;
+    width: 28px; height: 28px;
+    border-radius: 6px;
+  }
+  .nav-btns button:hover:not(:disabled) { background: #eceef1; color: var(--text); }
+  .nav-btns button:disabled { opacity: .35; cursor: default; }
+  .address-bar {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #eef0f3;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--muted);
+    font-family: ui-monospace, Menlo, monospace;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  #address-text { overflow: hidden; text-overflow: ellipsis; }
+  .account-badge {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 5px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    max-width: 320px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .account-badge .st { font-weight: 400; color: var(--muted); }
+  .account-badge .st.done { color: #1a7f37; font-weight: 600; }
+
+  .viewport { flex: 1; position: relative; min-height: 0; }
+  webview { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .loading-bar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 3px;
+    width: 0%;
+    background: var(--accent);
+    transition: width .4s ease;
+    z-index: 2;
+  }
+  .placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 14px;
+    background: #fafbfc;
+    z-index: 1;
+  }
+  .placeholder .icon { font-size: 40px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="browser-chrome">
+  <div class="nav-btns">
+    <button id="btn-back" title="Назад" disabled>‹</button>
+    <button id="btn-fwd" title="Вперёд" disabled>›</button>
+    <button id="btn-reload" title="Обновить" disabled>⟳</button>
+  </div>
+  <div class="address-bar">
+    <span>🔒</span>
+    <span id="address-text"></span>
+  </div>
+  <div class="account-badge">
+    <span id="acc-name"></span>
+    <span class="st" id="acc-status">ждём капчу…</span>
+  </div>
+</div>
+
+<div class="viewport">
+  <div class="loading-bar" id="loading-bar"></div>
+  <webview id="frame" src="about:blank" allowpopups></webview>
+  <div class="placeholder hidden" id="placeholder"></div>
+</div>
+
+<script>
+  const TM30_URL = "https://tm30.immigration.go.th";
+
+  // аккаунт приходит из main-процесса через query: ?d=<base64url(JSON)>
+  function readAccount() {
+    const d = new URLSearchParams(location.search).get("d");
+    if (!d) return null;
+    try {
+      const b64 = d.replace(/-/g, "+").replace(/_/g, "/");
+      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch { return null; }
+  }
+
+  const acc = readAccount() || { name: "без аккаунта", login: "", pass: "" };
+
+  const frame       = document.getElementById("frame");
+  const placeholder = document.getElementById("placeholder");
+  const addressText = document.getElementById("address-text");
+  const loadingBar  = document.getElementById("loading-bar");
+  const btnBack     = document.getElementById("btn-back");
+  const btnFwd      = document.getElementById("btn-fwd");
+  const btnReload   = document.getElementById("btn-reload");
+  const accStatus   = document.getElementById("acc-status");
+
+  document.getElementById("acc-name").textContent = acc.name;
+  document.title = acc.name + " — TM30";
+  addressText.textContent = TM30_URL;
+
+  // ---------- Автозаполнение после прохождения Turnstile ----------
+  function buildAutofillScript() {
+    return `
+      (function () {
+        if (window.__tm30Autofill) clearInterval(window.__tm30Autofill);
+        var LOGIN = ${JSON.stringify(acc.login)};
+        var PASS  = ${JSON.stringify(acc.pass)};
+
+        function setVal(el, v) {
+          var desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+          desc.set.call(el, v);
+          el.dispatchEvent(new Event("input",  { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          el.dispatchEvent(new Event("keyup",  { bubbles: true }));
+        }
+
+        window.__tm30Autofill = setInterval(function () {
+          var user = document.getElementById("user");
+          var pass = document.getElementById("pass");
+          if (!user || !pass) return;
+
+          var tokens = document.querySelectorAll('input[name="cf-turnstile-response"]');
+          var solved = Array.prototype.some.call(tokens, function (t) { return t.value && t.value.length > 0; });
+          if (!solved) return;
+
+          setVal(user, LOGIN);
+          setVal(pass, PASS);
+          clearInterval(window.__tm30Autofill);
+          window.__tm30Autofill = null;
+          window.__tm30Filled = true;
+        }, 400);
+      })();
+    `;
+  }
+
+  frame.addEventListener("dom-ready", () => {
+    if (!acc.login) return;
+    frame.executeJavaScript(buildAutofillScript()).catch(() => {});
+
+    const watch = setInterval(() => {
+      frame.executeJavaScript("window.__tm30Filled === true").then(filled => {
+        if (filled) {
+          accStatus.textContent = "✓ подставлено";
+          accStatus.classList.add("done");
+          clearInterval(watch);
+        }
+      }).catch(() => clearInterval(watch));
+    }, 600);
+  });
+
+  // ---------- Навигация ----------
+  btnBack.addEventListener("click", () => frame.canGoBack() && frame.goBack());
+  btnFwd.addEventListener("click", () => frame.canGoForward() && frame.goForward());
+  btnReload.addEventListener("click", () => frame.reload());
+
+  frame.addEventListener("did-start-loading", () => {
+    loadingBar.style.width = "70%";
+  });
+  frame.addEventListener("did-stop-loading", () => {
+    loadingBar.style.width = "100%";
+    setTimeout(() => { loadingBar.style.width = "0%"; }, 300);
+    btnBack.disabled   = !frame.canGoBack();
+    btnFwd.disabled    = !frame.canGoForward();
+    btnReload.disabled = false;
+  });
+  const syncAddress = e => { if (e.url && e.url !== "about:blank") addressText.textContent = e.url; };
+  frame.addEventListener("did-navigate", syncAddress);
+  frame.addEventListener("did-navigate-in-page", syncAddress);
+
+  frame.addEventListener("did-fail-load", e => {
+    if (e.errorCode === -3 || !e.isMainFrame) return;
+    loadingBar.style.width = "0%";
+    placeholder.classList.remove("hidden");
+    placeholder.innerHTML = `
+      <div class="icon">⚠️</div>
+      <div>Не удалось загрузить <b>${e.validatedURL || ""}</b></div>
+      <div style="font-size:12px">${e.errorDescription || "ошибка сети"}</div>`;
+  });
+
+  frame.src = TM30_URL;
+</script>
+
+</body>
+</html>
