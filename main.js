@@ -75,9 +75,12 @@ function openStandaloneWindow() {
 
 function handleDeepLink(url) {
   const acc = parseDeepLink(url);
-  console.log('[tm30-helper] deep link:', acc ? `ok, account="${acc.name}"` : `invalid: ${url}`);
+  console.log('[tm30-helper] deep link:', acc ? `account="${acc.name}"` : `chooser (${url})`);
   if (acc) {
     openAccountWindow(acc);
+  } else if (typeof url === 'string' && url.startsWith(PROTOCOL + '://')) {
+    // ссылка без аккаунта (tm30://open) — открываем список аккаунтов
+    openStandaloneWindow();
   }
 }
 
