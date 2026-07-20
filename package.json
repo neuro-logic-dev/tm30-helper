@@ -15,8 +15,10 @@
     "publish": null,
     "files": [
       "main.js",
+      "deeplink.js",
       "index.html",
-      "window.html"
+      "window.html",
+      "worklist.html"
     ],
     "protocols": [
       {

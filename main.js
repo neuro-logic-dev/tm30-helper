@@ -1,7 +1,7 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 
-const PROTOCOL = 'tm30';
+const { parseDeepLink, DeepLinkKind, PROTOCOL } = require('./deeplink');
 
 // ---------- Single instance ----------
 // Повторный запуск (в т.ч. по deep link на Win/Linux) пробрасывается
@@ -22,25 +22,11 @@ if (process.defaultApp) {
 }
 
 // ---------- Разбор deep link ----------
-// Формат: tm30://open?d=<base64url(JSON {name, login, pass})>
-function parseDeepLink(url) {
-  try {
-    if (!url || !url.startsWith(PROTOCOL + '://')) return null;
-    const u = new URL(url);
-    const d = u.searchParams.get('d');
-    if (!d) return null;
-    const b64 = d.replace(/-/g, '+').replace(/_/g, '/');
-    const acc = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-    if (!acc || !acc.login) return null;
-    return {
-      name: String(acc.name || acc.login),
-      login: String(acc.login),
-      pass: String(acc.pass || ''),
-    };
-  } catch {
-    return null;
-  }
-}
+// Формат: tm30://open?d=<base64url(JSON)>
+//   v1: {name, login, pass}          — legacy, поведение не менялось
+//   v2: {v:2, worklist:[...]}        — MO-TM30-014 §7.3
+// Сам парсер живёт в ./deeplink.js — без зависимости от electron, чтобы его
+// можно было прогонять тестом вместе с эмиттером (test/roundtrip.test.mjs).
 
 function findDeepLinkInArgv(argv) {
   return argv.find(a => typeof a === 'string' && a.startsWith(PROTOCOL + '://')) || null;
@@ -73,14 +59,68 @@ function openStandaloneWindow() {
   win.loadFile('index.html');
 }
 
+/**
+ * A-WEB-4b: минимальное окно, доказывающее, что провод работает — открылось + вот
+ * распарсенный payload. Двухпанельный UI (группы по виллам, панель портала) — это
+ * A-WEB-4c–4f, и здесь его сознательно НЕТ.
+ */
+function openWorklistWindow(worklist) {
+  const win = new BrowserWindow({
+    width: 1240,
+    height: 880,
+    title: 'TM30 Helper — worklist',
+    webPreferences: { webviewTag: true },
+  });
+  win.loadFile('worklist.html', { query: { d: toBase64Url({ v: 2, worklist }) } });
+  win.focus();
+}
+
+/**
+ * 🔴 Громкий отказ (MO-TM30-014 §7.9).
+ *
+ * Раньше любой неразобранный payload превращался в `null` и молча открывал chooser —
+ * сломанная ссылка выглядела как рабочая. Теперь битая ссылка показывает НАТИВНОЕ окно
+ * ошибки и НИКОГДА не деградирует до chooser'а. «Нет учётки» и «битая ссылка» — разные
+ * состояния, и выглядят они по-разному: первое открывает окно worklist'а, второе — вот это.
+ */
+function reportBrokenLink(reason, url) {
+  console.error('[tm30-helper] BROKEN DEEP LINK:', reason, '\n  url:', url);
+  dialog.showErrorBox(
+    'TM30 Helper — broken link',
+    `This tm30:// link could not be read:\n\n${reason}\n\n` +
+      'Nothing was opened. Go back to the web app and try again — if it keeps failing, ' +
+      'the link is likely too long or was cut off in transit.'
+  );
+}
+
 function handleDeepLink(url) {
-  const acc = parseDeepLink(url);
-  console.log('[tm30-helper] deep link:', acc ? `account="${acc.name}"` : `chooser (${url})`);
-  if (acc) {
-    openAccountWindow(acc);
-  } else if (typeof url === 'string' && url.startsWith(PROTOCOL + '://')) {
-    // ссылка без аккаунта (tm30://open) — открываем список аккаунтов
-    openStandaloneWindow();
+  const result = parseDeepLink(url);
+  if (!result) return; // не наша ссылка
+
+  switch (result.kind) {
+    case DeepLinkKind.V1:
+      console.log('[tm30-helper] deep link v1: account="' + result.account.name + '"');
+      openAccountWindow(result.account);
+      return;
+
+    case DeepLinkKind.V2: {
+      const withCreds = result.worklist.filter((r) => r.account).length;
+      console.log(
+        `[tm30-helper] deep link v2: ${result.worklist.length} filing(s), ` +
+          `${withCreds} with credentials, ${result.worklist.length - withCreds} manual-login`
+      );
+      openWorklistWindow(result.worklist);
+      return;
+    }
+
+    case DeepLinkKind.CHOOSER:
+      console.log('[tm30-helper] deep link: chooser (no payload)');
+      openStandaloneWindow();
+      return;
+
+    case DeepLinkKind.ERROR:
+    default:
+      reportBrokenLink(result.reason, url);
   }
 }
 
