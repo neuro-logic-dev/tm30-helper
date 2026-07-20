@@ -35,8 +35,10 @@
 | Файл | Назначение |
 |------|------------|
 | `main.js` | Electron main-процесс: регистрация протокола `tm30://`, single-instance, парсинг deep link, открытие окон |
-| `window.html` | Окно одного аккаунта: `<webview>` с TM30 + автозаполнение после Turnstile |
-| `index.html` | Standalone-режим (запуск без ссылки): таблица из 5 демо-аккаунтов |
+| `deeplink.js` | Парсер `tm30://` без зависимостей (v1 / v2 / chooser / error), прогоняется тестом `test/run.sh` |
+| `app.html` | **v2:** одно окно, две панели — worklist слева, `<webview>` портала справа (A-WEB-4c) |
+| `window.html` | **v1 legacy:** окно одного аккаунта: `<webview>` с TM30 + автозаполнение после Turnstile |
+| `index.html` | **v1 legacy:** standalone-режим (запуск без ссылки): таблица из 5 демо-аккаунтов |
 | `package.json` | Зависимости и конфиг electron-builder |
 
 ## Разработка

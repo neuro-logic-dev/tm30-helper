@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TM30 Helper</title>
+    <!--
+      A-WEB-4c — THE TWO-PANE WINDOW SHELL (014 §2.4, §3; mockup H1).
+
+      One window, two panes. This replaces v1's two-window model FOR THE v2 PATH ONLY: the v1
+      windows (`index.html` chooser, `window.html` per-account portal) are untouched and still
+      open for v1 links (013 §3.5 — backward-compat is mandatory).
+
+      ── What this file IS ───────────────────────────────────────────────────────────────────
+      The CONTAINER, matched to the signed-off mockup: a 360px worklist pane on the left, the
+      portal `<webview>` pane on the right, a urlbar above it and a status line below it.
+
+      ── What this file deliberately is NOT ──────────────────────────────────────────────────
+      · 4d — villa GROUPING, row states/badges, sort, the postponed (24h+) group. The left pane
+        renders a MINIMAL FLAT LIST here on purpose. `renderList()` is the single seam 4d
+        replaces; nothing else in this file knows how the list is drawn.
+      · 4e — credential AUTOFILL and the captcha-wait status. This file NEVER calls
+        `webview.executeJavaScript`. It stands the webview up and hands the human a browser.
+        `onActiveVillaChange` is the subscription 4e attaches to.
+      · 4f — hand-back (`✓ Mark as submitted` → `return_url`).
+
+      ── Constraints this file is built under ────────────────────────────────────────────────
+      · ZERO Helper network calls (014 §2.5). Everything rendered comes out of the deep-link
+        payload, which main.js already parsed and passed in as `?d=<base64url(JSON)>`. The
+        `<webview>` navigating to the portal is the HUMAN's browser session, not a Helper fetch.
+      · Portal NO-GO (010 §8). No DOM automation, no auto-submit, no captcha interaction.
+      · NO credentials is the NORMAL state (creds start empty, PO 2026-07-20). The window must
+        render fine without `account`, and the right pane still shows the portal for manual
+        login. Nothing here is gated on `account` being present.
+      · English only (4a′ PO ruling). No Russian strings.
+      · A session belongs to the VILLA, not to the group box it is drawn in (014 §7.2 AMB-1) —
+        hence `state.villaSession` is keyed by villa, and 4d must not re-key it per group.
+    -->
+    <style>
+      /* Tokens lifted verbatim from the signed-off mockup so 4d/4e inherit the same palette. */
+      :root {
+        --paper: #edf0f3; --surface: #ffffff; --surface-2: #f6f8fa;
+        --ink: #0f1519; --muted: #5a6673; --faint: #8794a2;
+        --line: #d3dae2; --line-soft: #e2e7ed;
+        --accent: #2a5d8f; --accent-soft: #e4edf6;
+        --due: #8a5a0e; --due-bg: #fbefd9;
+        --overdue: #9c2e26; --overdue-bg: #fbe3e0;
+        --ok: #1e6047; --ok-bg: #ddf0e7;
+        --blocked: #616d7a; --blocked-bg: #e7ebef;
+        --ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #10151a; --surface: #171e26; --surface-2: #1c242e;
+          --ink: #e4eaf0; --muted: #94a2b1; --faint: #6f7e8e;
+          --line: #29323d; --line-soft: #222a34;
+          --accent: #74a9dc; --accent-soft: #1b2a3a;
+          --due: #d9a441; --due-bg: #33280f;
+          --overdue: #e8776c; --overdue-bg: #3a1f1c;
+          --ok: #5fb98c; --ok-bg: #12301f;
+          --blocked: #8c9aa8; --blocked-bg: #232b34;
+        }
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: var(--ui);
+        font-size: 14px;
+        color: var(--ink);
+        background: var(--paper);
+      }
+
+      /* ── the two panes (mockup H1: grid 360px 1fr) ───────────────────────────────────── */
+      .panes {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        height: 100%;
+      }
+      .pane-l {
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        min-height: 0;
+      }
+      .pane-r {
+        display: flex;
+        flex-direction: column;
+        background: var(--surface-2);
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .pane-head {
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--line-soft);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex: 0 0 auto;
+      }
+      .pane-head h3 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: 0.02em; }
+      .pane-head .count { font-size: 11px; color: var(--faint); font-family: var(--mono); }
+
+      .list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        min-height: 0;
+      }
+
+      /* Minimal row. 4d owns the real states/badges — these are the shell's placeholders. */
+      .row {
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--blocked);
+        border-radius: 8px;
+        padding: 10px 11px;
+        background: var(--surface);
+        cursor: pointer;
+        transition: 0.15s;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        display: block;
+        width: 100%;
+      }
+      .row:hover { box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.25); }
+      .row.sel {
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+      .row.s-due { border-left-color: var(--due); }
+      .row.s-overdue { border-left-color: var(--overdue); }
+      .row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+      .villa { font-size: 13.5px; font-weight: 640; letter-spacing: -0.01em; line-height: 1.3; }
+      .when {
+        font-size: 11.5px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-variant-numeric: tabular-nums;
+        margin-top: 3px;
+      }
+      .badge {
+        flex: none;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border-radius: 5px;
+        white-space: nowrap;
+        background: var(--blocked-bg);
+        color: var(--blocked);
+      }
+      .badge.b-due { background: var(--due-bg); color: var(--due); }
+      .badge.b-overdue { background: var(--overdue-bg); color: var(--overdue); }
+
+      .empty {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 34px 20px;
+        text-align: center;
+      }
+      .empty .big { font-size: 13.5px; font-weight: 640; }
+      .empty .sm { font-size: 11.5px; color: var(--muted); max-width: 30ch; line-height: 1.5; }
+
+      /* ── right pane: urlbar · webview · status line ───────────────────────────────────── */
+      .urlbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 11px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line-soft);
+        flex: 0 0 auto;
+      }
+      .urlbar button {
+        border: none;
+        background: transparent;
+        color: var(--faint);
+        font-size: 14px;
+        cursor: pointer;
+        width: 24px;
+        height: 24px;
+        border-radius: 5px;
+      }
+      .urlbar button:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+      .urlbar button:disabled { opacity: 0.35; cursor: default; }
+      .urlbox {
+        flex: 1;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        background: var(--surface-2);
+        border: 1px solid var(--line-soft);
+        border-radius: 5px;
+        padding: 4px 9px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .viewport { flex: 1; position: relative; min-height: 0; }
+      webview { position: absolute; inset: 0; width: 100%; height: 100%; display: flex; }
+      .portal-msg {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 22px;
+        text-align: center;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 12px;
+        z-index: 2;
+      }
+      .portal-msg .icon { font-size: 30px; }
+      .portal-msg .hint { font-size: 11px; color: var(--faint); max-width: 46ch; line-height: 1.5; }
+      .hidden { display: none !important; }
+      .loading-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 3px;
+        width: 0%;
+        background: var(--accent);
+        transition: width 0.4s ease;
+        z-index: 3;
+      }
+
+      .statusline {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 13px;
+        border-top: 1px solid var(--line);
+        background: var(--surface-2);
+        font-size: 11.5px;
+        color: var(--muted);
+        flex-wrap: wrap;
+        flex: 0 0 auto;
+      }
+      .statusline .sep { color: var(--line); user-select: none; }
+      .statusline .spacer { flex: 1; }
+      .st-acct { font-weight: 600; color: var(--ink); }
+      .st-none { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="panes">
+      <!-- LEFT — the worklist container. 4d fills this with villa groups. -->
+      <section class="pane-l" aria-label="Worklist">
+        <div class="pane-head">
+          <h3>to do</h3>
+          <span class="count" id="count">—</span>
+        </div>
+        <div class="list" id="list"></div>
+      </section>
+
+      <!-- RIGHT — the portal pane. Real webview; the human drives it. -->
+      <section class="pane-r" aria-label="TM30 portal">
+        <div class="urlbar">
+          <button id="btn-back" title="Back" disabled>‹</button>
+          <button id="btn-fwd" title="Forward" disabled>›</button>
+          <button id="btn-reload" title="Reload" disabled>⟳</button>
+          <span class="urlbox" id="urlbox"></span>
+        </div>
+        <div class="viewport">
+          <div class="loading-bar" id="loading-bar"></div>
+          <!--
+            The portal URL lives HERE, as the attribute, and is the single source of truth (the
+            script reads it back out). Assigning `webview.src` from script races the element's
+            attachment and the navigation is silently dropped — the webview just sits on
+            about:blank with no did-fail-load to tell you. Verified while building 4c.
+          -->
+          <webview id="portal" src="https://tm30.immigration.go.th" allowpopups></webview>
+          <div class="portal-msg" id="portal-msg">
+            <div class="icon">◌</div>
+            <div>Loading the portal…</div>
+          </div>
+        </div>
+        <div class="statusline" id="statusline"></div>
+      </section>
+    </div>
+
+    <script>
+      'use strict';
+
+      var TM30_URL = document.getElementById('portal').getAttribute('src');
+
+      // ── payload ────────────────────────────────────────────────────────────────────────
+      // Same zero-dep mechanism v1 uses: main.js base64url-encodes the ALREADY-PARSED payload
+      // into the file query. No preload, no IPC, no fetch. main.js has already validated it and
+      // shown a native error box for anything broken, so this window only ever sees a good one.
+      function readPayload() {
+        var d = new URLSearchParams(location.search).get('d');
+        if (!d) return { v: 2, worklist: [] };
+        try {
+          var b64 = d.replace(/-/g, '+').replace(/_/g, '/');
+          var bytes = Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); });
+          return JSON.parse(new TextDecoder().decode(bytes));
+        } catch (e) {
+          console.error('[tm30-helper] app.html could not read its payload', e);
+          return { v: 2, worklist: [] };
+        }
+      }
+
+      /**
+       * The shell's whole state. Deliberately small.
+       *
+       * `villaSession` is keyed by VILLA and never by group box — 014 §7.2 AMB-1: a villa that
+       * straddles the 24h boundary is drawn in two buckets but is ONE session, and keying it per
+       * box would cost two Turnstile solves and defeat the reason grouping exists. 4c only stands
+       * the map up; 4e writes to it when a login lands.
+       */
+      var state = {
+        worklist: [],
+        activeVilla: null,
+        villaSession: Object.create(null),
+      };
+
+      var listeners = [];
+
+      var el = {
+        list: document.getElementById('list'),
+        count: document.getElementById('count'),
+        statusline: document.getElementById('statusline'),
+        portal: document.getElementById('portal'),
+        portalMsg: document.getElementById('portal-msg'),
+        urlbox: document.getElementById('urlbox'),
+        loadingBar: document.getElementById('loading-bar'),
+        back: document.getElementById('btn-back'),
+        fwd: document.getElementById('btn-fwd'),
+        reload: document.getElementById('btn-reload'),
+      };
+
+      // ── selection plumbing ─────────────────────────────────────────────────────────────
+      // Clicking a row makes its VILLA active. The villa — not the row — is the unit, because
+      // the villa is the portal-session boundary (014 §7.2). 4e subscribes via
+      // `onActiveVillaChange` and autofills that villa's account; 4c fires the event and moves
+      // the highlight, and does nothing to the portal.
+
+      /** The account for a villa, or null. Absent credentials is normal, not an error. */
+      function accountFor(villa) {
+        for (var i = 0; i < state.worklist.length; i += 1) {
+          if (state.worklist[i].villa === villa && state.worklist[i].account) {
+            return state.worklist[i].account;
+          }
+        }
+        return null;
+      }
+
+      function setActiveVilla(villa) {
+        if (state.activeVilla === villa) return;
+        state.activeVilla = villa;
+
+        var rows = el.list.querySelectorAll('[data-villa]');
+        for (var i = 0; i < rows.length; i += 1) {
+          rows[i].classList.toggle('sel', rows[i].getAttribute('data-villa') === villa);
+        }
+
+        renderStatusLine();
+        document.title = villa ? 'TM30 Helper — ' + villa : 'TM30 Helper';
+
+        var account = villa ? accountFor(villa) : null;
+        for (var j = 0; j < listeners.length; j += 1) {
+          try {
+            listeners[j]({ villa: villa, account: account, session: state.villaSession[villa] || null });
+          } catch (err) {
+            console.error('[tm30-helper] an active-villa listener threw', err);
+          }
+        }
+      }
+
+      /** 4e/4f attach here. Returns an unsubscribe. */
+      function onActiveVillaChange(fn) {
+        listeners.push(fn);
+        return function () {
+          var i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        };
+      }
+
+      // ── left pane render ───────────────────────────────────────────────────────────────
+      // 🔴 THE 4d SEAM. This flat list is placeholder rendering. 4d replaces THIS FUNCTION with
+      // villa groups + the postponed (24h+) group + row states/actions. Everything it must keep:
+      // each clickable element carries `data-villa`, and clicking calls `setActiveVilla`.
+      function renderList() {
+        el.list.textContent = '';
+
+        if (!state.worklist.length) {
+          var empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.innerHTML =
+            '<div style="font-size:26px">✓</div>' +
+            '<div class="big">Nothing to file today</div>' +
+            '<div class="sm">Every filing within the next 24 hours is submitted. ' +
+            'Re-open from the web to refresh this list.</div>';
+          el.list.appendChild(empty);
+          return;
+        }
+
+        state.worklist.forEach(function (row) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'row' + (row.dot ? ' s-' + row.dot : '');
+          btn.setAttribute('data-villa', row.villa);
+          btn.setAttribute('data-filing-id', row.filing_id);
+
+          var top = document.createElement('div');
+          top.className = 'row-top';
+
+          var left = document.createElement('div');
+          var villa = document.createElement('div');
+          villa.className = 'villa';
+          villa.textContent = row.villa; // one name, never split (009 §10)
+          var when = document.createElement('div');
+          when.className = 'when';
+          when.textContent = row.checkin || '—';
+          left.appendChild(villa);
+          left.appendChild(when);
+
+          var badge = document.createElement('span');
+          badge.className = 'badge' + (row.dot ? ' b-' + row.dot : '');
+          badge.textContent = row.dot || row.status || '—';
+
+          top.appendChild(left);
+          top.appendChild(badge);
+          btn.appendChild(top);
+
+          btn.addEventListener('click', function () { setActiveVilla(row.villa); });
+          el.list.appendChild(btn);
+        });
+      }
+
+      function renderCount() {
+        if (!state.worklist.length) {
+          el.count.textContent = '0';
+          return;
+        }
+        var villas = Object.create(null);
+        state.worklist.forEach(function (r) { villas[r.villa] = true; });
+        var n = Object.keys(villas).length;
+        el.count.textContent =
+          n + ' villa' + (n === 1 ? '' : 's') + ' · ' +
+          state.worklist.length + ' filing' + (state.worklist.length === 1 ? '' : 's');
+      }
+
+      // ── status line (mockup H8) ────────────────────────────────────────────────────────
+      // AMB-8 (unspecified at the gate): with NO villa active yet, the account slot would name a
+      // login that has not happened. We take the gate's own "show the count" option instead.
+      // 4e appends the captcha-wait / ✓ credentials filled states; 4c owns the account slot only.
+      function renderStatusLine() {
+        el.statusline.textContent = '';
+
+        function add(text, cls) {
+          var s = document.createElement('span');
+          if (cls) s.className = cls;
+          s.textContent = text;
+          el.statusline.appendChild(s);
+          return s;
+        }
+        function sep() { add('·', 'sep'); }
+
+        if (!state.activeVilla) {
+          add(state.worklist.length ? 'Select a villa to start' : 'Nothing to file', 'st-none');
+          return;
+        }
+
+        add(state.activeVilla, 'st-acct');
+        sep();
+
+        var account = accountFor(state.activeVilla);
+        if (account) {
+          add(account.login);
+        } else {
+          // Calm and first-class: on day one this is most villas, not a fault.
+          add('no credentials — log in manually', 'st-none');
+        }
+      }
+
+      // ── right pane: the portal webview ─────────────────────────────────────────────────
+      // The webview is stood up and pointed at the portal. That is ALL 4c does with it.
+      // No executeJavaScript, no autofill (4e), no submit detection (4i). Portal NO-GO, 010 §8.
+      function mountPortal() {
+        el.urlbox.textContent = TM30_URL;
+
+        el.back.addEventListener('click', function () {
+          if (el.portal.canGoBack()) el.portal.goBack();
+        });
+        el.fwd.addEventListener('click', function () {
+          if (el.portal.canGoForward()) el.portal.goForward();
+        });
+        el.reload.addEventListener('click', function () { el.portal.reload(); });
+
+        el.portal.addEventListener('did-start-loading', function () {
+          el.loadingBar.style.width = '70%';
+        });
+        el.portal.addEventListener('did-stop-loading', function () {
+          el.loadingBar.style.width = '100%';
+          setTimeout(function () { el.loadingBar.style.width = '0%'; }, 300);
+          el.portalMsg.classList.add('hidden');
+          el.back.disabled = !el.portal.canGoBack();
+          el.fwd.disabled = !el.portal.canGoForward();
+          el.reload.disabled = false;
+        });
+
+        function syncUrl(e) {
+          if (e.url && e.url !== 'about:blank') el.urlbox.textContent = e.url;
+        }
+        el.portal.addEventListener('did-navigate', syncUrl);
+        el.portal.addEventListener('did-navigate-in-page', syncUrl);
+
+        el.portal.addEventListener('did-fail-load', function (e) {
+          if (e.errorCode === -3 || !e.isMainFrame) return; // -3 = user-aborted
+          el.loadingBar.style.width = '0%';
+          el.portalMsg.classList.remove('hidden');
+          el.portalMsg.innerHTML =
+            '<div class="icon">⚠️</div>' +
+            '<div>Could not load <b></b></div>' +
+            '<div class="hint"></div>';
+          el.portalMsg.querySelector('b').textContent = e.validatedURL || TM30_URL;
+          el.portalMsg.querySelector('.hint').textContent =
+            (e.errorDescription || 'network error') +
+            ' — the portal is reached through your own session; try Reload, or open it by hand.';
+        });
+      }
+
+      // ── boot ───────────────────────────────────────────────────────────────────────────
+      var payload = readPayload();
+      state.worklist = Array.isArray(payload.worklist) ? payload.worklist : [];
+
+      renderCount();
+      renderList();
+      renderStatusLine();
+      mountPortal();
+
+      console.log(
+        '[tm30-helper] app.html: two-pane shell up — ' +
+          state.worklist.length + ' filing(s), ' +
+          state.worklist.filter(function (r) { return r.account; }).length + ' with credentials'
+      );
+
+      /**
+       * The seam 4d/4e/4f build against. Everything they need to reach is here and nowhere else.
+       */
+      window.tm30Shell = {
+        state: state,
+        setActiveVilla: setActiveVilla,
+        onActiveVillaChange: onActiveVillaChange,
+        accountFor: accountFor,
+        renderList: renderList,
+        renderStatusLine: renderStatusLine,
+        portal: el.portal,
+      };
+    </script>
+  </body>
+</html>

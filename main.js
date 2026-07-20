@@ -60,18 +60,25 @@ function openStandaloneWindow() {
 }
 
 /**
- * A-WEB-4b: минимальное окно, доказывающее, что провод работает — открылось + вот
- * распарсенный payload. Двухпанельный UI (группы по виллам, панель портала) — это
- * A-WEB-4c–4f, и здесь его сознательно НЕТ.
+ * A-WEB-4c: v2 → ОДНО окно с ДВУМЯ панелями (`app.html`): слева worklist, справа
+ * `<webview>` портала (014 §2.4, §3; макет H1). Заменило собой 4b-заглушку
+ * `worklist.html`, которая только доказывала, что провод работает.
+ *
+ * 🔴 Это окно ТОЛЬКО для v2. v1 (`openAccountWindow` / `openStandaloneWindow`)
+ * не тронут — обратная совместимость обязательна (013 §3.5).
+ *
+ * Механизм передачи данных прежний и намеренно нулевой по зависимостям: payload
+ * уезжает в query как base64url — ни preload, ни IPC, ни сети (014 §2.5).
  */
 function openWorklistWindow(worklist) {
   const win = new BrowserWindow({
-    width: 1240,
-    height: 880,
-    title: 'TM30 Helper — worklist',
+    width: 1440,
+    height: 900,
+    minWidth: 1080, // левая панель 360px + панель портала, ниже неё макет ломается
+    title: 'TM30 Helper',
     webPreferences: { webviewTag: true },
   });
-  win.loadFile('worklist.html', { query: { d: toBase64Url({ v: 2, worklist }) } });
+  win.loadFile('app.html', { query: { d: toBase64Url({ v: 2, worklist }) } });
   win.focus();
 }
 

@@ -18,7 +18,7 @@
       "deeplink.js",
       "index.html",
       "window.html",
-      "worklist.html"
+      "app.html"
     ],
     "protocols": [
       {
