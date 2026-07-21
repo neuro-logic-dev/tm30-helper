@@ -23,8 +23,9 @@
       portal `<webview>` pane on the right, a urlbar above it and a status line below it.
 
       ── What this file deliberately is NOT ──────────────────────────────────────────────────
-      · 4f — hand-back (`✓ Mark as submitted` → `return_url`). The button flips a LOCAL flag.
       · 4i — portal submit detection. Not accepted into iteration 1 (orchestrator 2026-07-17).
+      · a recorder of `submitted`. 4f hands `return_url` to the browser and the WEB records it via
+        endpoint #9 (005 §8.4). The Helper never learns the outcome — see `markSubmitted`.
 
       ── Constraints this file is built under ────────────────────────────────────────────────
       · ZERO Helper network calls (014 §2.5). Everything rendered comes out of the deep-link
@@ -615,8 +616,8 @@
       // What it deliberately does NOT do:
       //   · 4e — autofill. Nothing here calls `webview.executeJavaScript`. The group's session
       //     pill reads `state.villaSession`, which ONLY 4e ever writes.
-      //   · 4f — the hand-back. `✓ Mark as submitted` flips a LOCAL row flag and stops. See the
-      //     TODO(4f) marker in `markSubmitted`.
+      //   · record a submission. 4f's `✓ Mark as submitted` opens `return_url` in the operator's
+      //     REAL browser and stops there; the web tab records it (005 §8.4).
       // ═══════════════════════════════════════════════════════════════════════════════════
 
       var POSTPONED_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -796,23 +797,68 @@
       }
 
       /**
-       * ✓ Mark as submitted.
+       * Can this row's hand-back actually go anywhere?
        *
-       * 🔴 TODO(4f) — THE HAND-BACK GOES HERE AND NOWHERE ELSE.
-       * 4f must, from this point: open `row.return_url`
-       * (`?action=manage_booking&tab=tm30&confirm=submitted`) via the native bridge, and let the
-       * WEB call endpoint #9 to record `submitted_by` / `receipt_no` (005 §8.4). It is
-       * deliberately NOT built here: 4d owns the render and the download, 4f owns the loop.
+       * `return_url` is built WEB-side by the 4b emitter from `booking_id` (014 §7.3 defect 2 —
+       * routing is the web's business), and `deeplink.js` only copies it across when it is a
+       * string. A row can therefore arrive without one — from an older link, or a payload built
+       * before the emitter existed. 014 §7.9: that is stated, never papered over. `shell` also
+       * refuses anything that is not http(s) (`main.js` `isHttpUrl`), so the same rule is
+       * applied here rather than firing an IPC that is guaranteed to come back `ok:false`.
+       */
+      function canHandBack(row) {
+        return typeof row.return_url === 'string' && /^https?:\/\//i.test(row.return_url);
+      }
+
+      /**
+       * ✓ Mark as submitted — A-WEB-4f, THE HAND-BACK (005 §8.4).
        *
-       * What 4d does instead: flip a LOCAL, OPTIMISTIC flag so the button is provably wired and
-       * the AMB-5 sink is exercisable. Nothing is persisted and nothing is sent — reopening the
-       * link from the web reverts this row to whatever the server actually believes.
+       * 🔴 THIS FUNCTION OPENS A URL. THAT IS THE WHOLE FEATURE.
+       * `return_url` goes to the operator's DEFAULT BROWSER — never the portal `<webview>`, never
+       * a Helper request. The browser is where the manager's logged-in mo-reservation-fe session
+       * lives; the webview holds a Thai-immigration session and knows nothing about our cookies.
+       * The web tab then reads `confirm=submitted`, opens its confirm panel, takes the optional
+       * receipt number, and calls endpoint #9 with the user who is actually signed in.
+       *
+       * WHY THE HELPER DOES NOT CALL #9 ITSELF: iteration 1 gives the Helper no credentials and
+       * no network (014 §2.5 — it could not authenticate the attestation even if it wanted to),
+       * and `submitted_by` must be a real human's assent, captured where that human is
+       * identified. Iteration 2 (005 §8.4) revisits this with a short-lived token; not now.
+       *
+       * ⚠️ WHAT THE OPTIMISTIC FLIP DOES AND DOES NOT MEAN. `local.submitted` is set only after
+       * the OS confirms it opened the browser — that is the last fact the Helper ever learns.
+       * Whether the manager then pressed Confirm, typed a receipt, or closed the tab is
+       * invisible from here. So the flag is DISPLAY-ONLY (`local`, never persisted, never sent),
+       * the row says so in words, and the button stays live to reopen the confirm. The true
+       * status arrives the only way it can: the next worklist regenerated from the web.
        */
       function markSubmitted(row) {
-        state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {};
-        state.rowLocal[row.filing_id].submitted = true;
-        setStatusNote('marked submitted locally — hand-back lands in 4f', 'st-none');
-        renderList();
+        var local = (state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {});
+
+        if (!canHandBack(row)) {
+          local.handbackError = 'this row has no usable return link';
+          setStatusNote('no return link on this row — nothing was opened', 'st-none');
+          renderList();
+          return;
+        }
+        if (!window.tm30Native) {
+          local.handbackError = 'the native bridge did not load';
+          setStatusNote('hand-back unavailable — the native bridge did not load', 'st-none');
+          renderList();
+          return;
+        }
+
+        window.tm30Native.openExternal(row.return_url).then(function (res) {
+          if (res && res.ok) {
+            local.handbackError = null;
+            local.submitted = true; // optimistic, display-only — see the ⚠️ above
+            setStatusNote('opened the web confirm in your browser — finish it there', 'st-ok');
+          } else {
+            local.handbackError = (res && res.error) || 'unknown error';
+            setStatusNote('could not open your browser — ' + local.handbackError, 'st-none');
+          }
+          renderList();
+        });
       }
 
       // ── the render ─────────────────────────────────────────────────────────────────────
@@ -888,10 +934,26 @@
           statusBtn.classList.add('done');
           statusBtn.textContent = '✓ Approved';
           statusBtn.disabled = true;
-        } else if (kind === 'awaiting') {
+        } else if (kind === 'awaiting' && !(local.submitted && row.status !== 'submitted')) {
           statusBtn.classList.add('done');
           statusBtn.textContent = '✓ Submitted';
           statusBtn.disabled = true;
+        } else if (kind === 'awaiting') {
+          /**
+           * 4f: `submitted` here is the LOCAL optimistic flag, not the server's — we opened the
+           * browser and then went blind. A dead `✓ Submitted` would be the Helper claiming an
+           * outcome it never saw, and would strand an operator whose browser tab got closed
+           * before they confirmed. So the control stays live and says exactly what it is.
+           */
+          statusBtn.textContent = '↗ Reopen web confirm';
+          statusBtn.title =
+            'The Helper only opened your browser — it cannot see whether you confirmed. ' +
+            'Reopen the web confirm if you did not finish it.';
+          statusBtn.disabled = !canHandBack(row);
+          statusBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            markSubmitted(row);
+          });
         } else {
           /**
            * 🔴 A-WEB-4e — THE 4d `TODO(4e)` DIM, RESOLVED. Read the whole comment before
@@ -925,7 +987,15 @@
             statusBtn.classList.add('primary');
           }
           statusBtn.textContent = '✓ Mark as submitted';
-          statusBtn.disabled = kind === 'nosheet'; // nothing was uploaded, so nothing to attest
+          // nothing was uploaded → nothing to attest; no return link → nowhere to hand back to.
+          statusBtn.disabled = kind === 'nosheet' || !canHandBack(row);
+          if (!canHandBack(row)) {
+            // 🔴 Loud, not silent (014 §7.9). A dead button with no reason is the same bug.
+            statusBtn.classList.remove('primary');
+            statusBtn.title =
+              'This row arrived without a usable return link, so the Helper cannot open the ' +
+              'web confirm. Reopen the Helper from the web tab to get a fresh link.';
+          }
           statusBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             markSubmitted(row);
@@ -967,7 +1037,19 @@
 
         // ── the explanatory line, when the state has something to say ──
         var msg = '';
-        if (local.downloadError) msg = 'download failed — ' + local.downloadError;
+        if (local.handbackError) msg = 'hand-back failed — ' + local.handbackError;
+        else if (kind !== 'approved' && row.status !== 'submitted' && !canHandBack(row))
+          // 4f: stated on the row, not just hidden in a tooltip on a greyed button.
+          msg = 'No usable return link on this row — reopen the Helper from the web tab.';
+        else if (local.downloadError) msg = 'download failed — ' + local.downloadError;
+        else if (local.submitted && row.status !== 'submitted')
+          /**
+           * 🔴 The Helper's honesty line (4f). It opened a browser and learned nothing after
+           * that, so it must not read like `✓ Submitted` — the server's own word, which arrives
+           * only with the next worklist.
+           */
+          msg = 'Marked here after opening the web confirm — the Helper cannot see whether it ' +
+                'was recorded. The real status comes back with the next worklist.';
         else if (local.downloadPath) msg = 'sheet downloaded ✓ · ' + local.downloadPath;
         else if (kind === 'nosheet') msg = 'Sheet is generated from D-2 — nothing to upload yet.';
         else if (kind === 'awaiting') msg = 'Sent to immigration — verdict not back yet.';
@@ -1639,6 +1721,12 @@
         buildAutofillScript: buildAutofillScript,
         /** The in-flight autofill slot (villa/login/token), for inspection. */
         autofill: autofill,
+
+        // ── 4f ──────────────────────────────────────────────────────────────────────────
+        /** The hand-back: opens `row.return_url` in the DEFAULT browser (005 §8.4). */
+        markSubmitted: markSubmitted,
+        /** Whether a row carries a usable `return_url` at all (014 §7.9). */
+        canHandBack: canHandBack,
       };
     </script>
   </body>
