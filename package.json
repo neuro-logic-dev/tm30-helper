@@ -15,6 +15,7 @@
     "publish": null,
     "files": [
       "main.js",
+      "preload.js",
       "deeplink.js",
       "index.html",
       "window.html",

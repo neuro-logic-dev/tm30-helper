@@ -1,5 +1,6 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const { parseDeepLink, DeepLinkKind, PROTOCOL } = require('./deeplink');
 
@@ -76,7 +77,9 @@ function openWorklistWindow(worklist) {
     height: 900,
     minWidth: 1080, // левая панель 360px + панель портала, ниже неё макет ломается
     title: 'TM30 Helper',
-    webPreferences: { webviewTag: true },
+    // A-WEB-4d: preload — ТОЛЬКО для v2-окна. Даёт `app.html` ровно два глагола
+    // (скачать лист / открыть папку). v1-окна остаются без preload — 013 §3.5.
+    webPreferences: { webviewTag: true, preload: path.join(__dirname, 'preload.js') },
   });
   win.loadFile('app.html', { query: { d: toBase64Url({ v: 2, worklist }) } });
   win.focus();
@@ -130,6 +133,89 @@ function handleDeepLink(url) {
       reportBrokenLink(result.reason, url);
   }
 }
+
+// ---------- A-WEB-4d: скачивание листа + открытие папки ----------
+// Единственное сетевое действие хелпера — скачивание файла, инициированное человеком
+// (005 §8.3.1: «лист скачивается локально, дальше человек грузит его в портал руками»).
+// Никаких data-fetch'ей: 014 §2.5 остаётся в силе.
+
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+function isHttpUrl(raw) {
+  try {
+    const u = new URL(String(raw));
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** `~/Downloads/name.xlsx` → `~/Downloads/name (1).xlsx`, чтобы не затирать прошлый лист. */
+function uniqueDownloadPath(dir, rawName) {
+  const safe = path.basename(String(rawName || '')).replace(/[/\\]/g, '_') || 'tm30-sheet.xlsx';
+  const ext = path.extname(safe);
+  const stem = safe.slice(0, safe.length - ext.length) || 'tm30-sheet';
+
+  let candidate = path.join(dir, safe);
+  for (let n = 1; fs.existsSync(candidate); n += 1) {
+    candidate = path.join(dir, `${stem} (${n})${ext}`);
+  }
+  return candidate;
+}
+
+/**
+ * Скачивает `sheet_download_url` в системную папку загрузок и возвращает РЕАЛЬНЫЙ путь —
+ * рендерер печатает его в строку статуса (`sheet downloaded ✓`), поэтому путь должен быть
+ * тем, что лежит на диске, а не тем, что мы надеялись получить.
+ *
+ * ⚠️ `will-download` висит на сессии, а не на конкретном запросе, и ту же сессию использует
+ * `<webview>` портала. Поэтому слушатель ставится ТОЛЬКО на время нашей загрузки и снимается
+ * в `finish()` — иначе загрузка, начатая человеком в портале, приехала бы сюда.
+ */
+ipcMain.handle('tm30:download-sheet', (event, rawUrl) => {
+  if (!isHttpUrl(rawUrl)) return Promise.resolve({ ok: false, error: 'not an http(s) url' });
+
+  const wc = event.sender;
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      wc.session.removeListener('will-download', onWillDownload);
+      resolve(result);
+    };
+
+    const onWillDownload = (_e, item) => {
+      const target = uniqueDownloadPath(app.getPath('downloads'), item.getFilename());
+      item.setSavePath(target);
+      item.once('done', (_ev, state) => {
+        finish(
+          state === 'completed'
+            ? { ok: true, path: target, filename: path.basename(target) }
+            : { ok: false, error: state } // 'cancelled' | 'interrupted'
+        );
+      });
+    };
+
+    const timer = setTimeout(() => finish({ ok: false, error: 'timed out' }), DOWNLOAD_TIMEOUT_MS);
+
+    wc.session.on('will-download', onWillDownload);
+    wc.downloadURL(String(rawUrl));
+  });
+});
+
+/** 📁 — отдаём ссылку настоящему браузеру человека. Открыть браузер ≠ сетевой вызов хелпера. */
+ipcMain.handle('tm30:open-external', async (_event, rawUrl) => {
+  if (!isHttpUrl(rawUrl)) return { ok: false, error: 'not an http(s) url' };
+  try {
+    await shell.openExternal(String(rawUrl));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
 
 // deep link может прилететь до app.whenReady()
 let pendingLink = null;

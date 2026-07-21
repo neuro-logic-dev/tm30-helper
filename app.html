@@ -5,6 +5,9 @@
     <title>TM30 Helper</title>
     <!--
       A-WEB-4c — THE TWO-PANE WINDOW SHELL (014 §2.4, §3; mockup H1).
+      A-WEB-4d — the LEFT PANE's grouped worklist (014 §7.2; mockup H2 + H4). 4d replaced
+                 `renderList()`, the single seam 4c left for it, and added the ⬇ download +
+                 📁 folder actions through `preload.js`. Nothing else in the shell moved.
 
       One window, two panes. This replaces v1's two-window model FOR THE v2 PATH ONLY: the v1
       windows (`index.html` chooser, `window.html` per-account portal) are untouched and still
@@ -15,9 +18,6 @@
       portal `<webview>` pane on the right, a urlbar above it and a status line below it.
 
       ── What this file deliberately is NOT ──────────────────────────────────────────────────
-      · 4d — villa GROUPING, row states/badges, sort, the postponed (24h+) group. The left pane
-        renders a MINIMAL FLAT LIST here on purpose. `renderList()` is the single seam 4d
-        replaces; nothing else in this file knows how the list is drawn.
       · 4e — credential AUTOFILL and the captcha-wait status. This file NEVER calls
         `webview.executeJavaScript`. It stands the webview up and hands the human a browser.
         `onActiveVillaChange` is the subscription 4e attaches to.
@@ -114,20 +114,34 @@
         min-height: 0;
       }
 
-      /* Minimal row. 4d owns the real states/badges — these are the shell's placeholders. */
+      /*
+        🔴 `.list`, `.vg-body` and `.group-body` are all COLUMN FLEX containers, so their
+        children default to `flex-shrink: 1` and get SQUASHED once the worklist is taller than
+        the pane — rows lose their action bar and whole rows vanish behind the next group,
+        instead of the list scrolling. Observed while building 4d with a 9-row fixture. Every
+        list child is therefore pinned to its natural height; `.list`'s `overflow-y: auto` then
+        does what it was always meant to.
+      */
+      .list > *,
+      .vg-body > *,
+      .group-body > * { flex: 0 0 auto; }
+
+      /* ── worklist row (mockup H2 — row art lifted verbatim) ──────────────────────────── */
       .row {
         border: 1px solid var(--line);
         border-left: 3px solid var(--blocked);
         border-radius: 8px;
         padding: 10px 11px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
         background: var(--surface);
+        position: relative;
         cursor: pointer;
         transition: 0.15s;
         text-align: left;
         font: inherit;
         color: inherit;
-        display: block;
-        width: 100%;
       }
       .row:hover { box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.25); }
       .row.sel {
@@ -135,8 +149,13 @@
         border-color: var(--accent);
         box-shadow: inset 0 0 0 1px var(--accent);
       }
-      .row.s-due { border-left-color: var(--due); }
-      .row.s-overdue { border-left-color: var(--overdue); }
+      .row.s-need { border-left-color: var(--due); }
+      .row.s-dl { border-left-color: var(--accent); }
+      .row.s-sub { border-left-color: var(--ok); }
+      .row.s-over { border-left-color: var(--overdue); }
+      .row.s-block { border-left-color: var(--blocked); opacity: 0.75; }
+      .row.s-await { border-left-color: var(--ok); border-left-style: dashed; }
+
       .row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
       .villa { font-size: 13.5px; font-weight: 640; letter-spacing: -0.01em; line-height: 1.3; }
       .when {
@@ -146,6 +165,9 @@
         font-variant-numeric: tabular-nums;
         margin-top: 3px;
       }
+      .when .due { color: var(--due); font-weight: 600; }
+      .when .over { color: var(--overdue); font-weight: 700; }
+
       .badge {
         flex: none;
         font-size: 10px;
@@ -158,8 +180,140 @@
         background: var(--blocked-bg);
         color: var(--blocked);
       }
-      .badge.b-due { background: var(--due-bg); color: var(--due); }
-      .badge.b-overdue { background: var(--overdue-bg); color: var(--overdue); }
+      .badge.b-need { background: var(--due-bg); color: var(--due); }
+      .badge.b-dl { background: var(--accent-soft); color: var(--accent); }
+      .badge.b-sub { background: var(--ok-bg); color: var(--ok); }
+      .badge.b-over { background: var(--overdue-bg); color: var(--overdue); }
+      .badge.b-block { background: var(--blocked-bg); color: var(--blocked); }
+      .badge.b-await { background: transparent; color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
+
+      /*
+        Row action bar — ONE fixed slot order for every state: status · xlsx · folder. Markup is
+        authored in that order too, so tab order matches what you see; the `order` values are a
+        guard, not the mechanism. Slots are always PRESENT: they disable, they never disappear,
+        so nothing shifts position as a row changes state (mockup H2).
+      */
+      .acts { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; order: 2; }
+      .act-status { order: 1; margin-right: auto; }
+      .act-sheet { order: 2; }
+      .act-folder { order: 3; }
+      .btn {
+        font: inherit;
+        font-size: 11.5px;
+        font-weight: 550;
+        padding: 4px 9px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--surface-2);
+        color: var(--ink);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: 0.15s;
+      }
+      .btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+      .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+      .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .btn.primary:hover:not([disabled]) { filter: brightness(1.08); color: #fff; }
+      .btn.done { background: var(--ok-bg); border-color: transparent; color: var(--ok); cursor: default; }
+      .rowmsg { font-size: 11px; color: var(--muted); font-style: italic; order: 1; }
+
+      /* ── postponed (24h+) group + the "within 24h" divider (mockup H4) ───────────────── */
+      .group { border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
+      .group-h {
+        width: 100%;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        background: none;
+        border: 0;
+        cursor: pointer;
+        padding: 9px 11px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        text-align: left;
+      }
+      .group-h .chev { transition: transform 0.18s; display: inline-block; font-size: 9px; color: var(--faint); }
+      .group.open .chev { transform: rotate(90deg); }
+      .group-h .sub { color: var(--faint); font-weight: 500; }
+      .group-body { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 7px; }
+      .divider {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 3px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .divider::after { content: ''; flex: 1; height: 1px; background: var(--line-soft); }
+
+      /*
+        ── villa group (mockup H4, 014 §7.2) ───────────────────────────────────────────────
+        The villa — not the row — is the session unit. The header owns the login; the body owns
+        the rows that login unlocks. The inset rail down the body is that ownership, DRAWN: it
+        runs from the header through every row, so "one solve covers all of these" is visible.
+      */
+      .vgroup { border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
+      .vgroup-h {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 8px 11px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line-soft);
+        border-left: 3px solid var(--due);
+        cursor: pointer;
+        width: 100%;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+      }
+      .vgroup.open-session .vgroup-h { border-left-color: var(--ok); }
+      .vgroup.no-acct .vgroup-h { border-left-color: var(--blocked); }
+      .vgroup.sel .vgroup-h { background: var(--accent-soft); }
+      .vg-id { min-width: 0; flex: 1; }
+      .vg-name { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
+      .vg-acct {
+        font-size: 10.5px;
+        font-family: var(--mono);
+        color: var(--muted);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .vg-acct.none { font-family: var(--ui); font-style: italic; color: var(--faint); }
+      .vg-pill {
+        flex: none;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border-radius: 5px;
+        white-space: nowrap;
+      }
+      .vg-pill.locked { background: var(--due-bg); color: var(--due); }
+      .vg-pill.open { background: var(--ok-bg); color: var(--ok); }
+      .vg-pill.manual { background: var(--blocked-bg); color: var(--blocked); }
+      .vg-body {
+        padding: 7px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        box-shadow: inset 3px 0 0 var(--due);
+      }
+      .vgroup.open-session .vg-body { box-shadow: inset 3px 0 0 var(--ok); }
+      .vgroup.no-acct .vg-body { box-shadow: inset 3px 0 0 var(--blocked); }
+      .vgroup.finished .vg-body { box-shadow: inset 3px 0 0 var(--ok); }
+
+      .st-ok { color: var(--ok); font-weight: 600; }
 
       .empty {
         flex: 1;
@@ -330,6 +484,26 @@
         worklist: [],
         activeVilla: null,
         villaSession: Object.create(null),
+
+        // ── A-WEB-4d additions ──────────────────────────────────────────────────────────
+        /**
+         * Helper-LOCAL row facts, keyed by `filing_id`. These are NOT backend statuses and are
+         * never sent anywhere (mockup H2 GAP-B: "downloaded is Helper-local and must not be
+         * sent to a backend status"). `{ downloadPath, downloadError, submitted }`.
+         */
+        rowLocal: Object.create(null),
+        /** The postponed group is COLLAPSED by default (014 §2.5). Survives a re-render. */
+        postponedOpen: false,
+        /**
+         * 🔴 The bucket boundary, captured ONCE. 014 §2.1 / §7.1 Q2 / 007 GAP-6: NO countdown,
+         * NO live timer, ever. Every re-render (download, mark-submitted) reuses this instant,
+         * so a row can never migrate buckets while the operator is looking at it.
+         */
+        renderNow: 0,
+        /** Filled by `renderList`, read by `renderCount`. */
+        buckets: null,
+        /** Transient status-line note, e.g. `sheet downloaded ✓`. */
+        statusNote: null,
       };
 
       var listeners = [];
@@ -394,11 +568,488 @@
         };
       }
 
-      // ── left pane render ───────────────────────────────────────────────────────────────
-      // 🔴 THE 4d SEAM. This flat list is placeholder rendering. 4d replaces THIS FUNCTION with
-      // villa groups + the postponed (24h+) group + row states/actions. Everything it must keep:
-      // each clickable element carries `data-villa`, and clicking calls `setActiveVilla`.
+      // ═══════════════════════════════════════════════════════════════════════════════════
+      // A-WEB-4d — THE FILING WORKLIST PANE (014 §7.2, §3; mockup H2 + H4)
+      //
+      // This replaces 4c's placeholder flat list. Structure, top to bottom:
+      //
+      //   [ ▶ postponed (24h+) · N villas · M filings ]   ← collapsed by default, hidden if empty
+      //   ── within 24h ──────────────────────────────
+      //   [ villa group ] rows…                          ← most-urgent group first
+      //   [ villa group ] rows…
+      //   [ villa group ] rows…                          ← AMB-5: finished groups sink here
+      //
+      // What it deliberately does NOT do:
+      //   · 4e — autofill. Nothing here calls `webview.executeJavaScript`. The group's session
+      //     pill reads `state.villaSession`, which ONLY 4e ever writes.
+      //   · 4f — the hand-back. `✓ Mark as submitted` flips a LOCAL row flag and stops. See the
+      //     TODO(4f) marker in `markSubmitted`.
+      // ═══════════════════════════════════════════════════════════════════════════════════
+
+      var POSTPONED_AFTER_MS = 24 * 60 * 60 * 1000;
+      var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+      /**
+       * The six row states, and the mockup H2 art each one wears. `label` is the badge text.
+       *
+       * 🔴 This is a RENDERING of server fields, not a state machine. `overdue` comes from
+       * `row.dot`, which the server computed; `downloaded` is Helper-local and never leaves the
+       * process (mockup H2 GAP-B). Nothing here re-derives urgency.
+       */
+      var STATE_ART = {
+        need:       { row: 's-need',  badge: 'b-need',  label: 'need upload' },
+        downloaded: { row: 's-dl',    badge: 'b-dl',    label: 'downloaded' },
+        awaiting:   { row: 's-await', badge: 'b-await', label: 'awaiting approval' },
+        approved:   { row: 's-sub',   badge: 'b-sub',   label: 'approved' },
+        overdue:    { row: 's-over',  badge: 'b-over',  label: 'overdue' },
+        nosheet:    { row: 's-block', badge: 'b-block', label: 'no sheet yet' },
+      };
+
+      /** A group whose every row is in one of these has nothing left to do → AMB-5 sink. */
+      function isFinishedState(s) { return s === 'awaiting' || s === 'approved'; }
+
+      /**
+       * The check-in as UTC midnight of its DAY.
+       *
+       * 🔴 Day precision, deliberately (A-BE-5 finding #2: the source column is `DATEONLY`
+       * unless a check-in-event override exists; the 4a′ redraw dropped `· 12:00 ·` for exactly
+       * this reason). Parsed off the ISO STRING rather than through `new Date()` so the local
+       * timezone cannot shift a check-in onto the wrong day — the bug that would silently
+       * mis-bucket every filing for anyone west of UTC.
+       *
+       * @returns {number|null} epoch ms, or null when `checkin` is unusable.
+       */
+      function checkinDayMs(checkin) {
+        var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(checkin || ''));
+        if (!m) return null;
+        return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      }
+
+      /** `Fri 18 Jul` — the whole label the mockup draws. No clock (014 §2.1). */
+      function formatCheckinDay(checkin) {
+        var ms = checkinDayMs(checkin);
+        if (ms === null) return '—';
+        var d = new Date(ms);
+        return DAY_NAMES[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTH_NAMES[d.getUTCMonth()];
+      }
+
+      /**
+       * Is this check-in the CURRENT day? Compared in UTC on both sides, because the check-in
+       * is a UTC-midnight `DATEONLY` (A-BE-5 finding #2) — mixing a UTC date against a local
+       * one is how a row lands on the wrong day either side of midnight. Uses the same
+       * captured `state.renderNow`, so it is a snapshot like everything else here, not a clock.
+       */
+      function isToday(checkin) {
+        var ms = checkinDayMs(checkin);
+        if (ms === null) return false;
+        var now = new Date(state.renderNow);
+        return ms === Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      }
+
+      /**
+       * Which bucket a row falls in. **Per ROW, not per villa** — AMB-1 (2026-07-20): a villa
+       * straddling the boundary renders in BOTH buckets, and its postponed filing is never
+       * promoted just because a sibling is urgent. The villa group is a rendering inside each
+       * bucket, not an atomic unit that drags its members across.
+       *
+       * The boundary is the check-in (014 §7.1 Q2), measured against `state.renderNow` — an
+       * instant captured ONCE, never a ticking clock.
+       */
+      function isPostponed(row) {
+        var ms = checkinDayMs(row.checkin);
+        if (ms === null) return false; // unusable check-in → keep it in front of the operator
+        return ms > state.renderNow + POSTPONED_AFTER_MS;
+      }
+
+      /**
+       * The row's display state. Precedence runs finished → blocked → local → urgency.
+       *
+       * 🔴 `row.dot` is READ, never computed. 014 §7.3 defect 3 / `Tm30CollectionItem`: "MUST
+       * equal getTm30DotState — never recomputed client-side". The `when` line below shows the
+       * dot's urgency independently, so a row never loses its Due/Overdue signal to this
+       * precedence order.
+       */
+      function rowState(row) {
+        var local = state.rowLocal[row.filing_id];
+        if (row.status === 'acknowledged') return 'approved';
+        if (row.status === 'submitted' || (local && local.submitted)) return 'awaiting';
+        if (!row.sheet_download_url) return 'nosheet';
+        if (local && local.downloadPath) return 'downloaded';
+        if (row.dot === 'overdue') return 'overdue';
+        return 'need';
+      }
+
+      /**
+       * Groups rows by villa, PRESERVING ARRAY ORDER.
+       *
+       * AMB-4 (closed by existing code): the backend already sorts check-in → `filing_id`
+       * (`tm30.service.ts:143-147`), so a group's position is its first member's position and
+       * "most-urgent group first / most-urgent row first" falls out for free. Re-sorting here
+       * against a locally-derived key is exactly how the two halves drift apart — so we don't.
+       */
+      function groupByVilla(rows) {
+        var order = [];
+        var byVilla = Object.create(null);
+
+        rows.forEach(function (row) {
+          if (!byVilla[row.villa]) {
+            byVilla[row.villa] = [];
+            order.push(row.villa);
+          }
+          byVilla[row.villa].push(row);
+        });
+
+        return order.map(function (villa) {
+          var members = byVilla[villa];
+          return {
+            villa: villa,
+            rows: members,
+            finished: members.every(function (r) { return isFinishedState(rowState(r)); }),
+          };
+        });
+      }
+
+      /** AMB-5: fully-finished villa groups SINK below the actionable ones. Stable. */
+      function sinkFinished(groups) {
+        var actionable = groups.filter(function (g) { return !g.finished; });
+        var done = groups.filter(function (g) { return g.finished; });
+        return actionable.concat(done);
+      }
+
+      // ── row actions ────────────────────────────────────────────────────────────────────
+
+      /**
+       * ⬇ xlsx — THE trick (005 §8.3.1). No DOM automation, no upload robot: the Helper puts
+       * the sheet on the operator's disk and the human uploads it in the portal pane by hand.
+       * That is the entire "connect Excel to the portal" mechanism, and it is why this is the
+       * one and only byte the Helper ever pulls (014 §2.5 stands — this is a user-initiated
+       * FILE download, not a data fetch).
+       */
+      function downloadSheet(row, btn) {
+        if (!row.sheet_download_url) return;
+
+        if (!window.tm30Native) {
+          console.error('[tm30-helper] tm30Native bridge is missing — preload did not load');
+          setStatusNote('download unavailable — the native bridge did not load', 'st-none');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '⬇ downloading…';
+
+        window.tm30Native.downloadSheet(row.sheet_download_url).then(function (res) {
+          if (res && res.ok) {
+            state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {};
+            state.rowLocal[row.filing_id].downloadPath = res.path;
+            state.rowLocal[row.filing_id].downloadError = null;
+            // 4a′ PO ruling: English. (v1 said `лист скачан ✓`.)
+            setStatusNote('sheet downloaded ✓ · ' + res.path, 'st-ok');
+          } else {
+            var why = (res && res.error) || 'unknown error';
+            state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {};
+            state.rowLocal[row.filing_id].downloadError = why;
+            setStatusNote('download failed — ' + why, 'st-none');
+          }
+          renderList();
+        });
+      }
+
+      /** 📁 — hand the Drive folder to the human's real browser (005 §8.3.1 escape hatch). */
+      function openFolder(row) {
+        if (!row.folder_url || !window.tm30Native) return;
+        window.tm30Native.openExternal(row.folder_url);
+      }
+
+      /**
+       * ✓ Mark as submitted.
+       *
+       * 🔴 TODO(4f) — THE HAND-BACK GOES HERE AND NOWHERE ELSE.
+       * 4f must, from this point: open `row.return_url`
+       * (`?action=manage_booking&tab=tm30&confirm=submitted`) via the native bridge, and let the
+       * WEB call endpoint #9 to record `submitted_by` / `receipt_no` (005 §8.4). It is
+       * deliberately NOT built here: 4d owns the render and the download, 4f owns the loop.
+       *
+       * What 4d does instead: flip a LOCAL, OPTIMISTIC flag so the button is provably wired and
+       * the AMB-5 sink is exercisable. Nothing is persisted and nothing is sent — reopening the
+       * link from the web reverts this row to whatever the server actually believes.
+       */
+      function markSubmitted(row) {
+        state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {};
+        state.rowLocal[row.filing_id].submitted = true;
+        setStatusNote('marked submitted locally — hand-back lands in 4f', 'st-none');
+        renderList();
+      }
+
+      // ── the render ─────────────────────────────────────────────────────────────────────
+
+      /** One `.row` — mockup H2. AMB-6: the label is villa + check-in DATE and nothing else. */
+      function renderRow(row) {
+        var kind = rowState(row);
+        var art = STATE_ART[kind];
+        var local = state.rowLocal[row.filing_id] || {};
+
+        var box = document.createElement('div');
+        box.className = 'row ' + art.row + (row.villa === state.activeVilla ? ' sel' : '');
+        box.setAttribute('data-villa', row.villa);
+        box.setAttribute('data-filing-id', row.filing_id);
+        box.setAttribute('role', 'button');
+        box.setAttribute('tabindex', '0');
+
+        // ── top: villa + check-in day, and the badge ──
+        var top = document.createElement('div');
+        top.className = 'row-top';
+
+        var left = document.createElement('div');
+        var villa = document.createElement('div');
+        villa.className = 'villa';
+        villa.textContent = row.villa; // one name, never split (009 §10)
+
+        var when = document.createElement('div');
+        when.className = 'when';
+        when.textContent = formatCheckinDay(row.checkin);
+        /**
+         * The server's dot, rendered as-is — the ONLY urgency signal on the row.
+         *
+         * ⚠️ `dot: 'due'` means "not overdue", NOT "due today" (`getTm30DotState` /
+         * `Tm30SubmissionStatus`). Printing "Due today" on every non-overdue row labelled a
+         * check-in four days out as due today — caught rendering the postponed bucket. So the
+         * words are chosen by the calendar day, while the STATE is still the server's alone:
+         * `overdue` always shows, `due` shows "Due today" only on a row that really is today,
+         * and otherwise the date stands by itself (which is what the mockup draws for the
+         * postponed rows). This is label formatting, not a re-derived dot.
+         */
+        if (row.dot === 'overdue') {
+          when.appendChild(document.createTextNode(' · '));
+          var over = document.createElement('span');
+          over.className = 'over';
+          over.textContent = 'Overdue';
+          when.appendChild(over);
+        } else if (row.dot === 'due' && isToday(row.checkin)) {
+          when.appendChild(document.createTextNode(' · '));
+          var due = document.createElement('span');
+          due.className = 'due';
+          due.textContent = 'Due today';
+          when.appendChild(due);
+        }
+        left.appendChild(villa);
+        left.appendChild(when);
+
+        var badge = document.createElement('span');
+        badge.className = 'badge ' + art.badge;
+        badge.textContent = art.label;
+
+        top.appendChild(left);
+        top.appendChild(badge);
+        box.appendChild(top);
+
+        // ── actions: status · xlsx · folder, always all three, disabled not hidden ──
+        var acts = document.createElement('div');
+        acts.className = 'acts';
+
+        var statusBtn = document.createElement('button');
+        statusBtn.type = 'button';
+        statusBtn.className = 'btn act-status';
+        if (kind === 'approved') {
+          statusBtn.classList.add('done');
+          statusBtn.textContent = '✓ Approved';
+          statusBtn.disabled = true;
+        } else if (kind === 'awaiting') {
+          statusBtn.classList.add('done');
+          statusBtn.textContent = '✓ Submitted';
+          statusBtn.disabled = true;
+        } else {
+          statusBtn.classList.add('primary');
+          statusBtn.textContent = '✓ Mark as submitted';
+          statusBtn.disabled = kind === 'nosheet'; // nothing was uploaded, so nothing to attest
+          statusBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            markSubmitted(row);
+          });
+        }
+
+        var sheetBtn = document.createElement('button');
+        sheetBtn.type = 'button';
+        sheetBtn.className = 'btn act-sheet';
+        sheetBtn.textContent = '⬇ xlsx';
+        if (!row.sheet_download_url) {
+          // `no sheet yet` — D-2 has not generated it. Disabled, never absent (mockup H2).
+          sheetBtn.disabled = true;
+          sheetBtn.title = 'The sheet is generated from D-2 — nothing to download yet.';
+        } else {
+          sheetBtn.title = 'Download the sheet to your Downloads folder';
+          sheetBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            downloadSheet(row, sheetBtn);
+          });
+        }
+
+        var folderBtn = document.createElement('button');
+        folderBtn.type = 'button';
+        folderBtn.className = 'btn act-folder';
+        folderBtn.textContent = '📁';
+        folderBtn.title = 'Open the Drive folder';
+        folderBtn.setAttribute('aria-label', 'Open the Drive folder');
+        folderBtn.disabled = !row.folder_url;
+        folderBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openFolder(row);
+        });
+
+        acts.appendChild(statusBtn);
+        acts.appendChild(sheetBtn);
+        acts.appendChild(folderBtn);
+        box.appendChild(acts);
+
+        // ── the explanatory line, when the state has something to say ──
+        var msg = '';
+        if (local.downloadError) msg = 'download failed — ' + local.downloadError;
+        else if (local.downloadPath) msg = 'sheet downloaded ✓ · ' + local.downloadPath;
+        else if (kind === 'nosheet') msg = 'Sheet is generated from D-2 — nothing to upload yet.';
+        else if (kind === 'awaiting') msg = 'Sent to immigration — verdict not back yet.';
+        else if (kind === 'approved') msg = 'Nothing left to do here — the report was uploaded on the web tab.';
+
+        if (msg) {
+          var line = document.createElement('div');
+          line.className = 'rowmsg';
+          line.textContent = msg;
+          box.appendChild(line);
+        }
+
+        // Selection plumbing, unchanged from 4c: the click makes the VILLA active.
+        box.addEventListener('click', function () { setActiveVilla(row.villa); });
+        box.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setActiveVilla(row.villa);
+          }
+        });
+
+        return box;
+      }
+
+      /**
+       * One villa group — the SESSION unit (014 §7.2). The header owns the login; the rail down
+       * the body is "this login owns these filings", drawn.
+       *
+       * The pill reads `state.villaSession[villa]` — keyed by VILLA, never by group box (AMB-1).
+       * 4d never writes that map, so every credentialed group renders `🔒 log in` today; 4e
+       * fills it in and the pill turns green with no change here.
+       *
+       * ⚠️ The mockup also dims a locked group's row actions. 4d does NOT apply that: 4d ships
+       * no login mechanism, so `villaSession` is empty by construction and dimming would render
+       * a completely dead worklist — including the ⬇ download this ticket exists to deliver.
+       * The dim belongs with the thing that can undo it. TODO(4e).
+       */
+      function renderVillaGroup(group) {
+        var account = accountFor(group.villa);
+        var session = state.villaSession[group.villa] || null;
+
+        var box = document.createElement('div');
+        box.className = 'vgroup' +
+          (!account ? ' no-acct' : session ? ' open-session' : ' locked') +
+          (group.finished ? ' finished' : '') +
+          (group.villa === state.activeVilla ? ' sel' : '');
+        box.setAttribute('data-villa', group.villa);
+
+        var head = document.createElement('button');
+        head.type = 'button';
+        head.className = 'vgroup-h';
+        head.setAttribute('data-villa', group.villa);
+
+        var id = document.createElement('div');
+        id.className = 'vg-id';
+        var name = document.createElement('div');
+        name.className = 'vg-name';
+        name.textContent = group.villa;
+        var acct = document.createElement('div');
+        if (account) {
+          acct.className = 'vg-acct';
+          acct.textContent = account.login;
+        } else {
+          // Calm and first-class: on day one this is most villas, not a fault (014 §7.9).
+          acct.className = 'vg-acct none';
+          acct.textContent = 'no portal credentials yet';
+        }
+        id.appendChild(name);
+        id.appendChild(acct);
+
+        var pill = document.createElement('span');
+        if (!account) {
+          pill.className = 'vg-pill manual';
+          pill.textContent = 'manual login';
+        } else if (session) {
+          pill.className = 'vg-pill open';
+          pill.textContent = '🔓 session open';
+        } else {
+          pill.className = 'vg-pill locked';
+          pill.textContent = '🔒 log in';
+        }
+
+        head.appendChild(id);
+        head.appendChild(pill);
+        head.addEventListener('click', function () { setActiveVilla(group.villa); });
+        box.appendChild(head);
+
+        var body = document.createElement('div');
+        body.className = 'vg-body';
+        group.rows.forEach(function (row) { body.appendChild(renderRow(row)); });
+        box.appendChild(body);
+
+        return box;
+      }
+
+      /** The collapsible "postponed (24h+)" group. Hidden entirely when empty (014 §2.5). */
+      function renderPostponedGroup(groups) {
+        var filings = groups.reduce(function (n, g) { return n + g.rows.length; }, 0);
+
+        var box = document.createElement('div');
+        box.className = 'group' + (state.postponedOpen ? ' open' : '');
+
+        var head = document.createElement('button');
+        head.type = 'button';
+        head.className = 'group-h';
+        head.setAttribute('aria-expanded', state.postponedOpen ? 'true' : 'false');
+
+        var chev = document.createElement('span');
+        chev.className = 'chev';
+        chev.textContent = '▶';
+        head.appendChild(chev);
+        head.appendChild(document.createTextNode('postponed (24h+) '));
+
+        var sub = document.createElement('span');
+        sub.className = 'sub';
+        sub.textContent = '· ' + groups.length + ' villa' + (groups.length === 1 ? '' : 's') +
+          ' · ' + filings + ' filing' + (filings === 1 ? '' : 's');
+        head.appendChild(sub);
+
+        head.addEventListener('click', function () {
+          state.postponedOpen = !state.postponedOpen;
+          renderList();
+        });
+        box.appendChild(head);
+
+        if (state.postponedOpen) {
+          var body = document.createElement('div');
+          body.className = 'group-body';
+          groups.forEach(function (g) { body.appendChild(renderVillaGroup(g)); });
+          box.appendChild(body);
+        }
+
+        return box;
+      }
+
+      /**
+       * 🔴 THE 4d SEAM (replaces 4c's placeholder). Everything the shell relies on is kept:
+       * every clickable element carries `data-villa`, and clicking calls `setActiveVilla`.
+       * `state.villaSession` is NOT re-keyed per group — it stays villa-keyed (AMB-1).
+       */
       function renderList() {
+        // The instant is captured ONCE, on the first render, and reused by every re-render.
+        // A row must never change bucket because the operator took a minute to read it.
+        if (!state.renderNow) state.renderNow = Date.now();
+
         el.list.textContent = '';
 
         if (!state.worklist.length) {
@@ -410,53 +1061,43 @@
             '<div class="sm">Every filing within the next 24 hours is submitted. ' +
             'Re-open from the web to refresh this list.</div>';
           el.list.appendChild(empty);
+          state.buckets = { postponed: [], main: [] };
           return;
         }
 
+        var postponedRows = [];
+        var mainRows = [];
         state.worklist.forEach(function (row) {
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'row' + (row.dot ? ' s-' + row.dot : '');
-          btn.setAttribute('data-villa', row.villa);
-          btn.setAttribute('data-filing-id', row.filing_id);
-
-          var top = document.createElement('div');
-          top.className = 'row-top';
-
-          var left = document.createElement('div');
-          var villa = document.createElement('div');
-          villa.className = 'villa';
-          villa.textContent = row.villa; // one name, never split (009 §10)
-          var when = document.createElement('div');
-          when.className = 'when';
-          when.textContent = row.checkin || '—';
-          left.appendChild(villa);
-          left.appendChild(when);
-
-          var badge = document.createElement('span');
-          badge.className = 'badge' + (row.dot ? ' b-' + row.dot : '');
-          badge.textContent = row.dot || row.status || '—';
-
-          top.appendChild(left);
-          top.appendChild(badge);
-          btn.appendChild(top);
-
-          btn.addEventListener('click', function () { setActiveVilla(row.villa); });
-          el.list.appendChild(btn);
+          (isPostponed(row) ? postponedRows : mainRows).push(row);
         });
+
+        var postponedGroups = groupByVilla(postponedRows);
+        var mainGroups = sinkFinished(groupByVilla(mainRows));
+        state.buckets = { postponed: postponedGroups, main: mainGroups };
+
+        if (postponedGroups.length) {
+          el.list.appendChild(renderPostponedGroup(postponedGroups));
+
+          var divider = document.createElement('div');
+          divider.className = 'divider';
+          divider.textContent = 'within 24h';
+          el.list.appendChild(divider);
+        }
+
+        mainGroups.forEach(function (g) { el.list.appendChild(renderVillaGroup(g)); });
       }
 
+      /** Mockup H4: `4 villas · 5 within 24h`. Reads the buckets `renderList` just computed. */
       function renderCount() {
         if (!state.worklist.length) {
           el.count.textContent = '0';
           return;
         }
-        var villas = Object.create(null);
-        state.worklist.forEach(function (r) { villas[r.villa] = true; });
-        var n = Object.keys(villas).length;
+        var main = (state.buckets && state.buckets.main) || [];
+        var villas = main.length;
+        var filings = main.reduce(function (n, g) { return n + g.rows.length; }, 0);
         el.count.textContent =
-          n + ' villa' + (n === 1 ? '' : 's') + ' · ' +
-          state.worklist.length + ' filing' + (state.worklist.length === 1 ? '' : 's');
+          villas + ' villa' + (villas === 1 ? '' : 's') + ' · ' + filings + ' within 24h';
       }
 
       // ── status line (mockup H8) ────────────────────────────────────────────────────────
@@ -477,19 +1118,31 @@
 
         if (!state.activeVilla) {
           add(state.worklist.length ? 'Select a villa to start' : 'Nothing to file', 'st-none');
-          return;
-        }
-
-        add(state.activeVilla, 'st-acct');
-        sep();
-
-        var account = accountFor(state.activeVilla);
-        if (account) {
-          add(account.login);
         } else {
-          // Calm and first-class: on day one this is most villas, not a fault.
-          add('no credentials — log in manually', 'st-none');
+          add(state.activeVilla, 'st-acct');
+          sep();
+
+          var account = accountFor(state.activeVilla);
+          if (account) {
+            add(account.login);
+          } else {
+            // Calm and first-class: on day one this is most villas, not a fault.
+            add('no credentials — log in manually', 'st-none');
+          }
         }
+
+        // 4d: the download's own line — `sheet downloaded ✓` (4a′ PO ruling: English).
+        // Pushed right so it never fights the account slot 4c owns, or 4e's captcha-wait.
+        if (state.statusNote) {
+          add('', 'spacer');
+          add(state.statusNote.text, state.statusNote.cls || 'st-ok');
+        }
+      }
+
+      /** 4d's slot in the status line. `null` clears it. */
+      function setStatusNote(text, cls) {
+        state.statusNote = text ? { text: text, cls: cls } : null;
+        renderStatusLine();
       }
 
       // ── right pane: the portal webview ─────────────────────────────────────────────────
@@ -543,8 +1196,8 @@
       var payload = readPayload();
       state.worklist = Array.isArray(payload.worklist) ? payload.worklist : [];
 
-      renderCount();
-      renderList();
+      renderList(); // computes the buckets…
+      renderCount(); // …which this reads. Order matters.
       renderStatusLine();
       mountPortal();
 
@@ -564,6 +1217,8 @@
         accountFor: accountFor,
         renderList: renderList,
         renderStatusLine: renderStatusLine,
+        /** 4d's status-line slot; 4e's captcha-wait can share it. `null` clears. */
+        setStatusNote: setStatusNote,
         portal: el.portal,
       };
     </script>
