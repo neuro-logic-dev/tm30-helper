@@ -36,4 +36,9 @@ rm -rf "$BUILD_DIR"
 
 echo "→ running the seam test"
 cd "$HERE"
-node --test
+# Named explicitly, NOT discovered. `node --test` treats every .js under a directory called
+# `test` as a test file, so a bare `node --test` also picked up the compiled emitter in
+# `.build/` and — once A-WEB-4e added `autofill/` — tried to run two Electron entrypoints
+# outside Electron, turning a green suite into 2 spurious failures. This file is the seam test;
+# the 4e harness has its own runner (`run-autofill.sh`) because it needs a real Electron window.
+node --test roundtrip.test.mjs

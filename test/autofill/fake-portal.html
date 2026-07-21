@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FAKE TM30 portal — A-WEB-4e harness</title>
+    <!--
+      A stand-in for tm30.immigration.go.th that reproduces the ONE property of the real portal
+      the autofill design turns on: the ORDER things appear in.
+
+          t=0      page up. #user/#pass do NOT exist. cf-turnstile-response exists but is EMPTY.
+          t=1500   the login form mounts — #user/#pass appear, token STILL empty.
+          t=3500   "the human" clears the challenge — the token becomes non-empty.
+
+      That ordering is why the autofill is a POLLER and not a did-finish-load handler: a fill
+      fired on load injects into fields that do not exist yet, and a fill fired as soon as the
+      fields appear injects 2s before the human has cleared Cloudflare.
+
+      🔴 This is a FAKE. It is not a model of the real portal's markup, only of its timing and of
+      v1's three selectors. What the real login page actually contains is an INTEGRATION question
+      — see the ⚠️ INTEGRATION ITEM comment on `buildAutofillScript` in app.html.
+    -->
+    <style>
+      body { font: 14px system-ui; padding: 28px; background: #f4f5f7; }
+      .box { background:#fff; border:1px solid #ccd; border-radius:8px; padding:18px; max-width:420px; }
+      label { display:block; margin:10px 0 3px; font-size:12px; color:#556; }
+      input { width:100%; padding:7px 9px; font:inherit; border:1px solid #bbc; border-radius:5px; }
+      #turnstile { margin:14px 0; padding:12px; background:#eef; border-radius:6px; font-size:12px; }
+      #log { margin-top:16px; font:11px ui-monospace,Menlo,monospace; color:#345; white-space:pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h3 style="margin:0">TM30 — sign in <small style="color:#a44">(FAKE — 4e harness)</small></h3>
+
+      <div id="turnstile">⧗ Cloudflare challenge rendering…</div>
+      <input type="hidden" name="cf-turnstile-response" value="" />
+
+      <div id="formslot"></div>
+      <div id="log"></div>
+    </div>
+
+    <script>
+      var log = document.getElementById('log');
+      function say(m) {
+        log.textContent += m + '\n';
+        console.log('[fake-portal] ' + m);
+      }
+      say('t=0    page up. #user/#pass do NOT exist yet; cf-turnstile-response is EMPTY.');
+
+      setTimeout(function () {
+        document.getElementById('formslot').innerHTML =
+          '<label for="user">Username</label><input id="user" name="user" autocomplete="off">' +
+          '<label for="pass">Password</label><input id="pass" name="pass" type="password" autocomplete="off">';
+
+        // Echo the events `setVal` dispatches, so the harness log shows that the native-setter
+        // workaround really fired input/change/keyup and did not just poke `.value`.
+        ['user', 'pass'].forEach(function (id) {
+          ['input', 'change', 'keyup'].forEach(function (ev) {
+            document.getElementById(id).addEventListener(ev, function () {
+              say('       #' + id + ' got "' + ev + '"');
+            });
+          });
+        });
+        say('t=1500 login form mounted (#user, #pass now exist) — token still EMPTY.');
+      }, 1500);
+
+      setTimeout(function () {
+        document.querySelector('input[name="cf-turnstile-response"]').value =
+          'FAKE.turnstile.token.' + '0'.repeat(20);
+        document.getElementById('turnstile').textContent = '✓ challenge cleared (simulated human)';
+        say('t=3500 HUMAN cleared the challenge — cf-turnstile-response now non-empty.');
+      }, 3500);
+
+      /**
+       * Removes the login form WITHOUT a document navigation — an SPA route change, which is how
+       * a real portal takes you off the login page after a successful login.
+       *
+       * 🔴 This is the ONLY way to reach the state the per-selection token guard exists for. A
+       * real navigation wipes `window.__tm30Filled` along with the rest of the page, so a stale
+       * flag can never be read across one. Without a navigation the flag SURVIVES — so a villa
+       * selected after another villa's fill would read that fill as its own unless the flag is
+       * tokenised. Verified by mutation: reverting to v1's bare `= true` fails only this check.
+       */
+      window.__harnessRemoveForm = function () {
+        document.getElementById('formslot').innerHTML = '';
+        say('       SPA route change — login form removed, window state intact');
+      };
+
+      /** What actually landed in the fields. The harness asserts on this. */
+      window.__harnessFields = function () {
+        var u = document.getElementById('user');
+        var p = document.getElementById('pass');
+        return {
+          userExists: !!u,
+          passExists: !!p,
+          user: u ? u.value : null,
+          pass: p ? p.value : null,
+          token: document.querySelector('input[name="cf-turnstile-response"]').value,
+          filledFlag: window.__tm30Filled || null,
+          pollerLive: !!window.__tm30Autofill,
+        };
+      };
+    </script>
+  </body>
+</html>

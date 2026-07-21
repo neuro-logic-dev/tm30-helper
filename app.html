@@ -8,6 +8,11 @@
       A-WEB-4d — the LEFT PANE's grouped worklist (014 §7.2; mockup H2 + H4). 4d replaced
                  `renderList()`, the single seam 4c left for it, and added the ⬇ download +
                  📁 folder actions through `preload.js`. Nothing else in the shell moved.
+      A-WEB-4e — the RIGHT PANE's credential AUTOFILL, the captcha-wait status, and the
+                 villa session that unlocks a group (014 §3, §7.9; 005 §8.1/§8.3; mockup H5 + H8).
+                 4e is the ONLY code that calls `webview.executeJavaScript`, and it injects
+                 exactly one thing: the login + password, into the fields, once the HUMAN has
+                 cleared Turnstile. See the PORTAL NO-GO box in the 4e section below.
 
       One window, two panes. This replaces v1's two-window model FOR THE v2 PATH ONLY: the v1
       windows (`index.html` chooser, `window.html` per-account portal) are untouched and still
@@ -18,10 +23,8 @@
       portal `<webview>` pane on the right, a urlbar above it and a status line below it.
 
       ── What this file deliberately is NOT ──────────────────────────────────────────────────
-      · 4e — credential AUTOFILL and the captcha-wait status. This file NEVER calls
-        `webview.executeJavaScript`. It stands the webview up and hands the human a browser.
-        `onActiveVillaChange` is the subscription 4e attaches to.
-      · 4f — hand-back (`✓ Mark as submitted` → `return_url`).
+      · 4f — hand-back (`✓ Mark as submitted` → `return_url`). The button flips a LOCAL flag.
+      · 4i — portal submit detection. Not accepted into iteration 1 (orchestrator 2026-07-17).
 
       ── Constraints this file is built under ────────────────────────────────────────────────
       · ZERO Helper network calls (014 §2.5). Everything rendered comes out of the deep-link
@@ -479,6 +482,12 @@
        * straddles the 24h boundary is drawn in two buckets but is ONE session, and keying it per
        * box would cost two Turnstile solves and defeat the reason grouping exists. 4c only stands
        * the map up; 4e writes to it when a login lands.
+       *
+       * 🔴 4e — WHAT A `villaSession` ENTRY ACTUALLY ASSERTS. Read this before trusting it.
+       * It means: "for this villa, the human cleared Turnstile and we put the credentials in the
+       * fields." It does NOT mean "this villa is logged in" — the Helper never sees the login
+       * response. Observing that would be portal submit detection (4i), which is NOT in
+       * iteration 1. Everything downstream must treat it as a CUE, never as an authorization.
        */
       var state = {
         worklist: [],
@@ -504,6 +513,14 @@
         buckets: null,
         /** Transient status-line note, e.g. `sheet downloaded ✓`. */
         statusNote: null,
+
+        // ── A-WEB-4e addition ───────────────────────────────────────────────────────────
+        /**
+         * The portal slot of the status line: `waiting for captcha…` → `credentials filled ✓`
+         * (mockup H8). `{ text, cls }` or null. Belongs to the ACTIVE villa and is cleared the
+         * moment the selection moves, so it can never describe the wrong villa's portal.
+         */
+        portalStatus: null,
       };
 
       var listeners = [];
@@ -535,6 +552,22 @@
           }
         }
         return null;
+      }
+
+      /**
+       * 🔴 A-WEB-4e — THE DEFINITION OF "LOCKED", and the one line that keeps it from becoming
+       * 4d's dead worklist.
+       *
+       * Locked = this villa HAS credentials but no session yet. A CRED-LESS villa is **never**
+       * locked: it is `manual login` (014 §7.9 — the NORMAL launch state), the human types the
+       * password themselves, and the Helper has no way to observe that. Gating anything on a
+       * session a cred-less villa can never acquire would kill the exact rows that ship first.
+       *
+       * This matches `renderVillaGroup`'s class precedence exactly — `no-acct` BEFORE `locked` —
+       * so the group art and the row affordances can never disagree.
+       */
+      function isLocked(villa) {
+        return !!accountFor(villa) && !state.villaSession[villa];
       }
 
       function setActiveVilla(villa) {
@@ -860,7 +893,37 @@
           statusBtn.textContent = '✓ Submitted';
           statusBtn.disabled = true;
         } else {
-          statusBtn.classList.add('primary');
+          /**
+           * 🔴 A-WEB-4e — THE 4d `TODO(4e)` DIM, RESOLVED. Read the whole comment before
+           * changing this, because both of the obvious moves are wrong.
+           *
+           * WHAT LOCKING GATES: the `✓ Mark as submitted` CUE, and nothing else. On a locked
+           * villa the button drops `.primary` — it stops *inviting* the click — and says why on
+           * hover. That is the whole dim.
+           *
+           * WHAT LOCKING MUST NOT GATE, and why:
+           *   · ⬇ xlsx — a DRIVE download, wholly independent of the portal. The real sequence
+           *     is download-the-sheet THEN log in to upload it, so gating the download on the
+           *     login inverts the operator's own order and deadlocks the pane (4d's correct
+           *     objection; the reason 4d deferred the dim rather than shipping it).
+           *   · 📁 folder — likewise a Drive link, handed to the human's own browser.
+           *   · the rows themselves — 4d's dead-worklist trap. Nothing here is disabled by lock.
+           *
+           * WHY THE BUTTON IS DIMMED BUT **NOT DISABLED**: a session entry only proves *we*
+           * autofilled (see `state.villaSession`). An operator who typed the password by hand,
+           * or who works a cred-less villa, has genuinely submitted and must still be able to
+           * say so. A hard disable would make this attestation unreachable for exactly the
+           * people doing the work manually. The lock lowers the invitation; it never takes the
+           * control away.
+           */
+          var locked = isLocked(row.villa);
+          if (locked) {
+            statusBtn.title =
+              'Log in to this villa in the portal first — select the villa and solve the ' +
+              'captcha. You can still mark it submitted if you logged in by hand.';
+          } else {
+            statusBtn.classList.add('primary');
+          }
           statusBtn.textContent = '✓ Mark as submitted';
           statusBtn.disabled = kind === 'nosheet'; // nothing was uploaded, so nothing to attest
           statusBtn.addEventListener('click', function (e) {
@@ -934,13 +997,17 @@
        * the body is "this login owns these filings", drawn.
        *
        * The pill reads `state.villaSession[villa]` — keyed by VILLA, never by group box (AMB-1).
-       * 4d never writes that map, so every credentialed group renders `🔒 log in` today; 4e
-       * fills it in and the pill turns green with no change here.
+       * 4e writes that map on a successful autofill, and the pill turns green with no change
+       * here — the seam 4d left worked as designed.
        *
-       * ⚠️ The mockup also dims a locked group's row actions. 4d does NOT apply that: 4d ships
-       * no login mechanism, so `villaSession` is empty by construction and dimming would render
-       * a completely dead worklist — including the ⬇ download this ticket exists to deliver.
-       * The dim belongs with the thing that can undo it. TODO(4e).
+       * ⚠️ The `locked` CLASS carries no rule of its own: `.vgroup-h`'s amber `border-left` and
+       * `.vg-body`'s amber rail ARE the locked look, and `open-session` / `no-acct` override
+       * them. So `locked` is the DEFAULT state of a credentialed group, which is correct — a
+       * freshly-opened Helper has solved no captchas.
+       *
+       * ⚠️ The mockup also dims a locked group's row ACTIONS. 4e applies that to exactly one
+       * affordance — see the long comment on the `✓ Mark as submitted` button in `renderRow`.
+       * The ⬇ download and 📁 folder are Drive-side and stay live at all times.
        */
       function renderVillaGroup(group) {
         var account = accountFor(group.villa);
@@ -1129,6 +1196,20 @@
             // Calm and first-class: on day one this is most villas, not a fault.
             add('no credentials — log in manually', 'st-none');
           }
+
+          /**
+           * 4e's portal slot (mockup H8): `waiting for captcha…` → `credentials filled ✓`.
+           * These are the 4a′ English translations of v1's `ждём капчу…` / `✓ подставлено`
+           * (`window.html:123,204`) — same two states, same order, same meaning.
+           *
+           * A cred-less villa leaves this slot EMPTY on purpose: the account slot directly to
+           * its left already reads `no credentials — log in manually`, and saying it twice in
+           * one line reads like a warning about a state that is simply normal (014 §7.9).
+           */
+          if (state.portalStatus) {
+            sep();
+            add(state.portalStatus.text, state.portalStatus.cls);
+          }
         }
 
         // 4d: the download's own line — `sheet downloaded ✓` (4a′ PO ruling: English).
@@ -1192,6 +1273,333 @@
         });
       }
 
+      // ═══════════════════════════════════════════════════════════════════════════════════
+      // A-WEB-4e — CREDENTIAL AUTOFILL + THE VILLA SESSION (005 §8.1/§8.3, 014 §3; mockup H5)
+      //
+      // ┌─ 🔴 PORTAL NO-GO — 010 §8, 005 §8.1. THE LINE THIS WHOLE FEATURE IS BUILT AROUND ──┐
+      // │                                                                                    │
+      // │  The Helper puts the LOGIN and the PASSWORD into two input fields. That is the     │
+      // │  entire contract with the portal. It does not:                                     │
+      // │                                                                                    │
+      // │    · click Log in, or submit any form         · solve, bypass or read Turnstile    │
+      // │    · navigate the portal                      · touch the upload page              │
+      // │                                                                                    │
+      // │  The HUMAN clears Cloudflare, presses Log in, navigates to batch upload, picks the │
+      // │  downloaded sheet and submits it. 010 §8's probe is why: the portal 403s a bot even │
+      // │  headful, and human-in-the-loop is the ONLY path. The one read we perform is the   │
+      // │  `cf-turnstile-response` VALUE — read to know when the field will accept typing,   │
+      // │  never to produce or replay a token. It is v1's poller, unchanged.                 │
+      // │                                                                                    │
+      // │  If you are adding a `.click()`, a `.submit()`, or a `loadURL` in this section, the │
+      // │  answer is no.                                                                     │
+      // └────────────────────────────────────────────────────────────────────────────────────┘
+      //
+      // Still ZERO Helper network calls (014 §2.5): this injects script into the page the
+      // HUMAN's webview session already loaded. Nothing is fetched.
+      // ═══════════════════════════════════════════════════════════════════════════════════
+
+      /** v1's cadences, kept (`window.html:192,209`) — they are field-proven against the portal. */
+      var AUTOFILL_POLL_MS = 400;
+      var FILLED_WATCH_MS = 600;
+
+      /**
+       * The in-flight autofill, or an empty slot. Exactly ONE villa is ever pending: selecting a
+       * second villa supersedes the first rather than racing it.
+       */
+      var autofill = { villa: null, login: null, pass: null, token: null, watch: null };
+      var autofillSeq = 0;
+
+      /**
+       * v1's `buildAutofillScript` (`window.html:163-206`), MIRRORED — the selectors are the
+       * portal DOM knowledge v1 earned in production and this ticket must not re-invent:
+       *
+       *   · `#user` / `#pass`                      the login fields, by id
+       *   · `input[name="cf-turnstile-response"]`  Cloudflare's hidden token field; non-empty
+       *                                            value ⇒ the human cleared the challenge
+       *   · the native `HTMLInputElement.value` setter + input/change/keyup
+       *                                            the React-controlled-input workaround, without
+       *                                            which the framework overwrites the typed value
+       *   · a 400ms poller, because the portal renders Turnstile BEFORE the login form — firing
+       *     on load would inject into fields that do not exist yet
+       *
+       * ⚠️ INTEGRATION ITEM — THE ONE THING THIS TICKET COULD NOT VERIFY (4e, 2026-07-21).
+       * A read-only probe of the LIVE portal (no clicking, no solving) found this at t=15s:
+       *
+       *     url    https://tm30.immigration.go.th/   title "Just a moment..."
+       *     inputs exactly ONE — id="cf-chl-widget-8rh6t_response" name="cf-turnstile-response"
+       *     #user  absent      #pass absent      forms: none      Ray ID: a1e868290e81f136
+       *
+       * So the challenge is a **Cloudflare interstitial**, a DIFFERENT document from the login
+       * page — and the `cf-turnstile-response` we can see today belongs to the INTERSTITIAL.
+       * The poller's condition is an AND across ONE document (`#user` && `#pass` && a non-empty
+       * token). It is therefore unproven whether the post-challenge LOGIN page carries a
+       * turnstile input of its own. If it does not, `Array.prototype.some` over an EMPTY NodeList
+       * returns `false` and **autofill would never fire** — the status would sit on
+       * `waiting for captcha…` forever with the fields right there in front of the operator.
+       *
+       * v1 shipped this exact condition and reportedly worked, which is evidence the login page
+       * does carry its own widget — but it is second-hand, the portal has been re-fronted since,
+       * and confirming it needs a HUMAN to solve the challenge once. That is a 20-second check at
+       * integration and it must be done: click through, then read `#user`/`#pass` and the token
+       * count on the page that appears. The logic is deliberately left as v1 wrote it until then
+       * (the ticket's "mirror, don't reinvent" constraint) — do not "fix" this on a guess.
+       *
+       * THE ONE DELTA FROM v1, and why it is required here: v1 was one window per account, so a
+       * bare `window.__tm30Filled = true` could never be misread. This window switches villas
+       * against ONE long-lived page, where a `true` left behind by villa A is read as villa B's
+       * fill the instant B is selected — silently opening a session for a villa whose credentials
+       * were never typed. Note this needs NO navigation to happen: a navigation would wipe the
+       * flag. It is the portal SPA-routing off the login page that leaves it set.
+       *
+       * TWO things stop that, and it is worth knowing which does the work:
+       *   1. `window.__tm30Filled = null` at the top of this script — the PRIMARY guard. Every
+       *      injection resets the flag, so a new villa starts from a clean slate.
+       *   2. the per-selection TOKEN, which the watcher below matches exactly — a belt for the
+       *      window between the watcher starting and the (async) injection landing, where #1 has
+       *      not applied yet and a 600ms tick could still read the stale value.
+       * Mutation-tested: removing BOTH fails the harness's stale-flag scenario; removing either
+       * alone does not, because each covers the other's main case. Do not delete one on the
+       * grounds that the harness stays green.
+       */
+      function buildAutofillScript(login, pass, token) {
+        return `
+          (function () {
+            if (window.__tm30Autofill) clearInterval(window.__tm30Autofill);
+            var LOGIN = ${JSON.stringify(login)};
+            var PASS  = ${JSON.stringify(pass)};
+            var TOKEN = ${JSON.stringify(token)};
+
+            window.__tm30Filled = null;
+
+            function setVal(el, v) {
+              var desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+              desc.set.call(el, v);
+              el.dispatchEvent(new Event("input",  { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              el.dispatchEvent(new Event("keyup",  { bubbles: true }));
+            }
+
+            window.__tm30Autofill = setInterval(function () {
+              var user = document.getElementById("user");
+              var pass = document.getElementById("pass");
+              if (!user || !pass) return;
+
+              var tokens = document.querySelectorAll('input[name="cf-turnstile-response"]');
+              var solved = Array.prototype.some.call(tokens, function (t) { return t.value && t.value.length > 0; });
+              if (!solved) return;
+
+              setVal(user, LOGIN);
+              setVal(pass, PASS);
+              clearInterval(window.__tm30Autofill);
+              window.__tm30Autofill = null;
+              window.__tm30Filled = TOKEN;
+            }, ${AUTOFILL_POLL_MS});
+          })();
+        `;
+      }
+
+      /** 4e's slot in the status line. `null` clears it. */
+      function setPortalStatus(text, cls) {
+        state.portalStatus = text ? { text: text, cls: cls } : null;
+        renderStatusLine();
+      }
+
+      /** Renderer-side only: forget the pending villa and stop polling for its flag. */
+      function clearAutofillSlot() {
+        if (autofill.watch) {
+          clearInterval(autofill.watch);
+          autofill.watch = null;
+        }
+        autofill.villa = null;
+        autofill.login = null;
+        autofill.pass = null;
+        autofill.token = null;
+      }
+
+      /**
+       * Leave the portal with NO villa pending: forget the slot AND kill the in-page poller.
+       *
+       * The in-page teardown is the part that matters for safety. Without it, deselecting a villa
+       * would leave a live poller in the page still holding that villa's password, ready to type
+       * it into whatever login form the human navigates to next. Killing the poller is how the
+       * credential stops being pending.
+       *
+       * 🔴 Used ONLY when nothing replaces the pending villa. `startAutofill` deliberately does
+       * NOT call this: `executeJavaScript` is async, so a teardown fired just before an injection
+       * can land just AFTER it and `clearInterval` the poller it was supposed to precede — the new
+       * villa would then wait for a captcha forever. The injected script's own first line already
+       * clears its predecessor, so a replacing selection needs the renderer-side clear and nothing
+       * more. Ordering is not a thing to rely on here; not depending on it is free.
+       */
+      function stopAutofill() {
+        var had = !!autofill.villa;
+        clearAutofillSlot();
+        if (!had) return;
+        try {
+          el.portal.executeJavaScript(
+            'if (window.__tm30Autofill) { clearInterval(window.__tm30Autofill); window.__tm30Autofill = null; }' +
+              ' window.__tm30Filled = null;'
+          ).catch(function () {});
+        } catch (e) {
+          /* webview not attached — there is no poller to stop */
+        }
+      }
+
+      /**
+       * (Re)inject the pending villa's script into whatever the webview is showing NOW.
+       *
+       * Called on selection AND on every `dom-ready`, because a navigation wipes the injected
+       * poller: the human landing back on the login page after a failed attempt must get the
+       * credentials again, not a dead pane. v1 hooked `dom-ready` for the same reason
+       * (`window.html:197`) — it just only ever had one page to hook.
+       */
+      function injectAutofill() {
+        if (!autofill.villa) return;
+        try {
+          el.portal
+            .executeJavaScript(buildAutofillScript(autofill.login, autofill.pass, autofill.token))
+            .catch(function (err) {
+              console.warn('[tm30-helper] 4e: autofill injection was rejected', err);
+            });
+        } catch (e) {
+          // Webview not attached yet. `dom-ready` will call us again — that IS the retry.
+          console.warn('[tm30-helper] 4e: webview not ready for injection yet');
+        }
+      }
+
+      /**
+       * The human cleared Turnstile and the credentials went in. Open the villa's session.
+       *
+       * 🔴 Villa-keyed, never group-keyed (AMB-1, 014 §7.2): a villa straddling the 24h boundary
+       * is DRAWN in two buckets but is ONE session, and keying this per group box would demand a
+       * second Turnstile solve for the same villa — defeating the entire reason the worklist is
+       * grouped. The key here is `villa` and there is no group in scope to key it by.
+       *
+       * No timestamp is stored. 014 §2.1 forbids countdowns, and a stored `at` is the first thing
+       * a future ticket renders as "expires in…".
+       */
+      function openVillaSession(villa, account) {
+        state.villaSession[villa] = { login: account.login, via: 'autofill' };
+        console.log('[tm30-helper] 4e: session opened for villa "' + villa + '" (autofill landed)');
+
+        // 4a′ PO ruling: English. v1 said `✓ подставлено` (`window.html:204`).
+        setPortalStatus('credentials filled ✓', 'st-ok');
+        renderList(); // the group's pill flips 🔒 log in → 🔓 session open, and the rail turns green
+        renderCount();
+      }
+
+      /**
+       * Begin autofilling `villa`. The status goes to `waiting for captcha…` IMMEDIATELY and
+       * stays there until the human clears the challenge — that wait is the honest state, and it
+       * is the one v1 shipped (`window.html:123`, `ждём капчу…`).
+       */
+      function startAutofill(villa, account) {
+        clearAutofillSlot(); // NOT stopAutofill — see the ordering note on it
+
+        autofillSeq += 1;
+        var token = 'tm30-fill-' + autofillSeq;
+        autofill.villa = villa;
+        autofill.login = account.login;
+        autofill.pass = account.pass || '';
+        autofill.token = token;
+
+        setPortalStatus('waiting for captcha…', 'st-none');
+        injectAutofill();
+
+        autofill.watch = setInterval(function () {
+          if (autofill.token !== token) return; // superseded by a later selection
+          var probe;
+          try {
+            probe = el.portal.executeJavaScript('window.__tm30Filled || null');
+          } catch (e) {
+            return;
+          }
+          probe
+            .then(function (filled) {
+              // Both guards matter: the token can be stale (villa switched between the call and
+              // its resolution) and the flag can belong to a previous villa's fill.
+              if (autofill.token !== token || filled !== token) return;
+              clearInterval(autofill.watch);
+              autofill.watch = null;
+              openVillaSession(villa, account);
+            })
+            .catch(function () {
+              /**
+               * The page is mid-navigation, so the probe cannot run. Keep watching rather than
+               * giving up (v1 cleared the interval here) — the human bouncing off a failed login
+               * back to the form is a NORMAL path, and `dom-ready` will have re-injected by the
+               * next tick. The watcher is bounded by selection: switching villas clears it.
+               */
+            });
+        }, FILLED_WATCH_MS);
+      }
+
+      /**
+       * 🔴 THE SEAM. 4c fires this on every selection change; 4e decides what the portal does.
+       *
+       * Three outcomes, and the cred-less one is the NORMAL one on day 1 (014 §7.9 — credentials
+       * start empty and customers fill villa data later):
+       *
+       *   account, no session  → autofill, `waiting for captcha…`
+       *   account, session     → nothing to do; restore `credentials filled ✓`
+       *   NO account           → NOTHING is injected. The portal keeps showing the login page for
+       *                          the human to fill in by hand. This is not an error and is never
+       *                          rendered as one — the group pill reads `manual login` and the
+       *                          status line reads `no credentials — log in manually`.
+       */
+      function mountAutofill() {
+        // A navigation drops the injected poller; put it back for the villa still waiting.
+        el.portal.addEventListener('dom-ready', function () {
+          if (autofill.villa) injectAutofill();
+        });
+
+        onActiveVillaChange(function (ev) {
+          if (!ev.villa) {
+            stopAutofill();
+            setPortalStatus(null);
+            return;
+          }
+
+          if (!ev.account) {
+            // 🔴 Cred-less villa. Deliberately inert. Never errored (014 §7.9).
+            stopAutofill();
+            setPortalStatus(null);
+            console.log(
+              '[tm30-helper] 4e: villa "' + ev.villa + '" has no credentials — ' +
+                'no autofill; the portal pane stays up for manual login'
+            );
+            return;
+          }
+
+          if (state.villaSession[ev.villa]) {
+            stopAutofill();
+            setPortalStatus('credentials filled ✓', 'st-ok');
+            return;
+          }
+
+          console.log(
+            '[tm30-helper] 4e: autofilling villa "' + ev.villa + '" as "' + ev.account.login + '" — ' +
+              'waiting for the human to clear Turnstile'
+          );
+          startAutofill(ev.villa, ev.account);
+        });
+      }
+
+      /**
+       * ⚠️ WHAT 4e DELIBERATELY DOES **NOT** DO ON SELECTION: navigate the webview to the portal.
+       *
+       * 014 §3 says "navigate the pane to the portal if needed", but that instruction predates
+       * the pane existing. The `src` ATTRIBUTE already points the webview at the portal from the
+       * first paint and is the single source of truth (4c's finding — assigning `.src` from
+       * script silently no-ops). By the time any villa can be selected, the portal is loaded.
+       *
+       * So a selection-time navigation could only ever do one thing: yank the page out from under
+       * a human who is mid-Turnstile, mid-upload, or mid-form, because they clicked a row to read
+       * it. That is navigation automation, which is exactly what 010 §8 forbids, and it destroys
+       * the session that autofill exists to help open. The human drives this pane; ‹ › ⟳ are
+       * theirs. We inject into whatever they are looking at, and nothing else.
+       */
+
       // ── boot ───────────────────────────────────────────────────────────────────────────
       var payload = readPayload();
       state.worklist = Array.isArray(payload.worklist) ? payload.worklist : [];
@@ -1200,6 +1608,7 @@
       renderCount(); // …which this reads. Order matters.
       renderStatusLine();
       mountPortal();
+      mountAutofill(); // 4e — subscribes to `onActiveVillaChange`; nothing fires until a click
 
       console.log(
         '[tm30-helper] app.html: two-pane shell up — ' +
@@ -1217,9 +1626,19 @@
         accountFor: accountFor,
         renderList: renderList,
         renderStatusLine: renderStatusLine,
-        /** 4d's status-line slot; 4e's captcha-wait can share it. `null` clears. */
+        /** 4d's status-line slot (right-hand side). `null` clears. */
         setStatusNote: setStatusNote,
         portal: el.portal,
+
+        // ── 4e ──────────────────────────────────────────────────────────────────────────
+        /** Has credentials, has no session. A cred-less villa is NEVER locked. */
+        isLocked: isLocked,
+        /** The captcha-wait slot. Exposed so a harness can read the transitions. */
+        setPortalStatus: setPortalStatus,
+        /** The exact script injected into the portal — asserted verbatim by the 4e harness. */
+        buildAutofillScript: buildAutofillScript,
+        /** The in-flight autofill slot (villa/login/token), for inspection. */
+        autofill: autofill,
       };
     </script>
   </body>
