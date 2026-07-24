@@ -13,6 +13,12 @@
                  4e is the ONLY code that calls `webview.executeJavaScript`, and it injects
                  exactly one thing: the login + password, into the fields, once the HUMAN has
                  cleared Turnstile. See the PORTAL NO-GO box in the 4e section below.
+      A-WEB-4g — PER-VILLA PORTAL SESSIONS. The single shared `<webview>` became a POOL: one
+                 webview per villa, each on its own `persist:tm30-v-…` partition (own cookie
+                 jar), created lazily on first selection and toggled with `.hidden` after that.
+                 Plus ↻ fresh login — the human-initiated per-villa session reset, and the ONE
+                 programmatic navigation this file is allowed (see the carve-out on
+                 `freshLogin`). The 4e autofill now targets the pending villa's OWN webview.
 
       One window, two panes. This replaces v1's two-window model FOR THE v2 PATH ONLY: the v1
       windows (`index.html` chooser, `window.html` per-account portal) are untouched and still
@@ -306,6 +312,27 @@
       .vg-pill.locked { background: var(--due-bg); color: var(--due); }
       .vg-pill.open { background: var(--ok-bg); color: var(--ok); }
       .vg-pill.manual { background: var(--blocked-bg); color: var(--blocked); }
+      /*
+        4g: ↻ fresh login — the per-villa session reset, in the header ROW. It sits BESIDE the
+        header content rather than inside a <button>, because the header stopped being one (HTML
+        forbids button-in-button; see `renderVillaGroup`). On EVERY group, creds or not —
+        a cred-less villa's operator restarts a MANUAL login with the same click.
+      */
+      .vg-fresh {
+        flex: none;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 5px;
+        border: 1px solid var(--line);
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: 0.15s;
+      }
+      .vg-fresh:hover { border-color: var(--accent); color: var(--accent); }
       .vg-body {
         padding: 7px;
         display: flex;
@@ -436,18 +463,21 @@
           <button id="btn-reload" title="Reload" disabled>⟳</button>
           <span class="urlbox" id="urlbox"></span>
         </div>
-        <div class="viewport">
+        <div class="viewport" id="viewport">
           <div class="loading-bar" id="loading-bar"></div>
           <!--
-            The portal URL lives HERE, as the attribute, and is the single source of truth (the
-            script reads it back out). Assigning `webview.src` from script races the element's
-            attachment and the navigation is silently dropped — the webview just sits on
-            about:blank with no did-fail-load to tell you. Verified while building 4c.
+            A-WEB-4g: no static <webview> here any more. Each villa gets its OWN webview — its
+            own `persist:` partition, its own cookie jar — created lazily on the villa's first
+            selection (`ensureWebview`) and appended into this viewport. 4c's race finding still
+            binds every one of them: `src` and `partition` go on as ATTRIBUTES before the element
+            is appended, because assigning `webview.src` from script races the attachment and the
+            navigation is silently dropped — the webview just sits on about:blank with no
+            did-fail-load to tell you (verified while building 4c) — and `partition` is IMMUTABLE
+            once the element is attached. Switching villas toggles `.hidden` and nothing else.
           -->
-          <webview id="portal" src="https://tm30.immigration.go.th" allowpopups></webview>
           <div class="portal-msg" id="portal-msg">
             <div class="icon">◌</div>
-            <div>Loading the portal…</div>
+            <div>Select a villa — its portal session opens here.</div>
           </div>
         </div>
         <div class="statusline" id="statusline"></div>
@@ -457,7 +487,13 @@
     <script>
       'use strict';
 
-      var TM30_URL = document.getElementById('portal').getAttribute('src');
+      /**
+       * 4g: with the per-villa webview pool there is no static <webview> to read this off, so
+       * the portal root lives here — and is stamped onto every pool webview as its `src`
+       * ATTRIBUTE at creation, which is what actually navigates it (4c's ruling: `.src` from
+       * script silently no-ops; the attribute, set before attach, is the mechanism).
+       */
+      var TM30_URL = 'https://tm30.immigration.go.th';
 
       // ── payload ────────────────────────────────────────────────────────────────────────
       // Same zero-dep mechanism v1 uses: main.js base64url-encodes the ALREADY-PARSED payload
@@ -530,7 +566,7 @@
         list: document.getElementById('list'),
         count: document.getElementById('count'),
         statusline: document.getElementById('statusline'),
-        portal: document.getElementById('portal'),
+        viewport: document.getElementById('viewport'),
         portalMsg: document.getElementById('portal-msg'),
         urlbox: document.getElementById('urlbox'),
         loadingBar: document.getElementById('loading-bar'),
@@ -1102,9 +1138,16 @@
           (group.villa === state.activeVilla ? ' sel' : '');
         box.setAttribute('data-villa', group.villa);
 
-        var head = document.createElement('button');
-        head.type = 'button';
+        /**
+         * 4g: the header used to be a <button>, but the ↻ fresh-login control now lives inside
+         * the header row and HTML forbids a button inside a button. So the header is a
+         * div[role=button] carrying the exact same look (`.vgroup-h` styles are unchanged),
+         * the same whole-row click-to-select, and Enter/Space handling to stay keyboardable.
+         */
+        var head = document.createElement('div');
         head.className = 'vgroup-h';
+        head.setAttribute('role', 'button');
+        head.setAttribute('tabindex', '0');
         head.setAttribute('data-villa', group.villa);
 
         var id = document.createElement('div');
@@ -1136,9 +1179,35 @@
           pill.textContent = '🔒 log in';
         }
 
+        /**
+         * ↻ fresh login (4g part B) — on EVERY group, creds or not: a cred-less villa's
+         * operator also needs to restart a manual login (wrong account typed, expired portal
+         * session) without restarting the app. `stopPropagation` because the click must reset,
+         * not double as select-the-row — `freshLogin` itself makes the villa active anyway.
+         * A keyboard Enter/Space on this button fires a `click` on it too, and the same
+         * stopPropagation keeps it out of the header's whole-row select.
+         */
+        var fresh = document.createElement('button');
+        fresh.type = 'button';
+        fresh.className = 'vg-fresh';
+        fresh.textContent = '↻ fresh login';
+        fresh.title = "Clear this villa's portal session and start the login over";
+        fresh.addEventListener('click', function (e) {
+          e.stopPropagation();
+          freshLogin(group.villa);
+        });
+
         head.appendChild(id);
+        head.appendChild(fresh);
         head.appendChild(pill);
         head.addEventListener('click', function () { setActiveVilla(group.villa); });
+        head.addEventListener('keydown', function (e) {
+          if (e.target !== head) return; // the ↻ button handles its own keys
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setActiveVilla(group.villa);
+          }
+        });
         box.appendChild(head);
 
         var body = document.createElement('div');
@@ -1308,50 +1377,305 @@
         renderStatusLine();
       }
 
-      // ── right pane: the portal webview ─────────────────────────────────────────────────
-      // The webview is stood up and pointed at the portal. That is ALL 4c does with it.
-      // No executeJavaScript, no autofill (4e), no submit detection (4i). Portal NO-GO, 010 §8.
-      function mountPortal() {
-        el.urlbox.textContent = TM30_URL;
+      // ═══════════════════════════════════════════════════════════════════════════════════
+      // A-WEB-4g — THE PER-VILLA WEBVIEW POOL + ↻ FRESH LOGIN
+      //
+      // One villa = one <webview> = one `persist:` partition = one cookie jar. The single
+      // shared webview 4c stood up meant every villa's portal login landed in the SAME
+      // session — logging in villa B silently replaced villa A's. The invariants:
+      //
+      //   · partition: `persist:tm30-v-<encodeURIComponent(villa)>` — deterministic and
+      //     prefix-guarded (main.js refuses to clear anything outside `persist:tm30-`).
+      //     `persist:` is REQUIRED: the cookie jar survives an app restart, so a solved
+      //     Turnstile is not lost to an accidental window close.
+      //   · webviews are created LAZILY on a villa's first selection, NEVER destroyed on a
+      //     switch, and NEVER share a partition. Switching toggles `.hidden` and nothing
+      //     else — a half-filled upload form must survive a stray click on another row; that
+      //     is the reason the pool exists. Do NOT reload on switch, and do NOT "optimize" by
+      //     sharing a partition: one Turnstile solve per villa is the accepted price.
+      //   · 🔴 4c's race finding, now a POOL invariant: `src` and `partition` are set as
+      //     ATTRIBUTES before the element is appended. `partition` is IMMUTABLE after attach —
+      //     never set it on an attached element. After attach, navigation is `loadURL()`, and
+      //     the ONE place allowed to call it is `freshLogin` (see the carve-out there).
+      //   · every webview listener is bound PER webview at creation, records into its OWN
+      //     pool entry, and repaints the SHARED chrome (urlbar, loading bar, error panel, nav
+      //     buttons) ONLY while its webview is the active one — otherwise villa A's background
+      //     navigation repaints villa B's urlbar.
+      // ═══════════════════════════════════════════════════════════════════════════════════
 
-        el.back.addEventListener('click', function () {
-          if (el.portal.canGoBack()) el.portal.goBack();
-        });
-        el.fwd.addEventListener('click', function () {
-          if (el.portal.canGoForward()) el.portal.goForward();
-        });
-        el.reload.addEventListener('click', function () { el.portal.reload(); });
+      /** The one partition scheme. main.js's reset handler trusts exactly this prefix. */
+      function partitionFor(villa) {
+        return 'persist:tm30-v-' + encodeURIComponent(villa);
+      }
 
-        el.portal.addEventListener('did-start-loading', function () {
-          el.loadingBar.style.width = '70%';
+      /**
+       * villa → { el, url, loading, ready, everLoaded, fail }. `el` is the villa's <webview>;
+       * the rest is that webview's private view of the SHARED chrome, replayed by
+       * `renderPortalChrome` whenever the villa becomes active. Entries are created by
+       * `ensureWebview` and never removed — the pool only grows, by design.
+       */
+      var portalPool = Object.create(null);
+      /** The ACTIVE villa's pool entry, or null. `tm30Shell.portal` resolves through this. */
+      var activePortal = null;
+
+      /** Get-or-create the villa's pool entry. Idempotent; creation is the ONLY appending. */
+      function ensureWebview(villa) {
+        var rec = portalPool[villa];
+        if (rec) return rec;
+
+        var wv = document.createElement('webview');
+        // 🔴 ATTRIBUTES, BEFORE APPEND — 4c's race finding + partition immutability (the
+        // section box above). This `src` load is the villa's ONE selection-time navigation,
+        // and it happens at CREATION; selecting the villa again only toggles visibility.
+        wv.setAttribute('src', TM30_URL);
+        wv.setAttribute('partition', partitionFor(villa));
+        wv.setAttribute('allowpopups', '');
+        wv.setAttribute('data-villa', villa);
+        wv.classList.add('hidden'); // revealed by showVillaPortal
+
+        rec = portalPool[villa] = {
+          el: wv,
+          url: TM30_URL,
+          loading: true, // the `src` load starts the moment the element attaches
+          ready: false, // webview methods throw before the first dom-ready — this is the gate
+          everLoaded: false,
+          fail: null,
+        };
+        bindPortalListeners(rec, villa);
+        el.viewport.appendChild(wv);
+        return rec;
+      }
+
+      /**
+       * All the chrome wiring 4c bound once to its single webview, now bound per POOL MEMBER.
+       * Every handler updates its OWN record unconditionally and touches the shared chrome
+       * only while it is the active one — that guard is the whole point (section box above).
+       */
+      function bindPortalListeners(rec, villa) {
+        var wv = rec.el;
+        function active() { return activePortal === rec; }
+
+        wv.addEventListener('did-start-loading', function () {
+          rec.loading = true;
+          rec.fail = null;
+          if (active()) el.loadingBar.style.width = '70%';
         });
-        el.portal.addEventListener('did-stop-loading', function () {
-          el.loadingBar.style.width = '100%';
-          setTimeout(function () { el.loadingBar.style.width = '0%'; }, 300);
-          el.portalMsg.classList.add('hidden');
-          el.back.disabled = !el.portal.canGoBack();
-          el.fwd.disabled = !el.portal.canGoForward();
-          el.reload.disabled = false;
+
+        wv.addEventListener('did-stop-loading', function () {
+          rec.loading = false;
+          rec.everLoaded = true;
+          if (active()) {
+            el.loadingBar.style.width = '100%';
+            setTimeout(function () {
+              // the operator may have switched villas during the 300ms flourish
+              if (active() && !rec.loading) el.loadingBar.style.width = '0%';
+            }, 300);
+            renderPortalChrome();
+          }
+        });
+
+        wv.addEventListener('dom-ready', function () {
+          rec.ready = true;
+          if (active()) renderPortalChrome();
+          /**
+           * 4e's re-injection hook, per webview (4g): a navigation wiped the injected poller,
+           * so put it back — but ONLY when THIS webview's villa is the one still pending.
+           * Another villa's background navigation must never trigger an injection of this
+           * villa's credentials, and `injectAutofill` itself targets `autofill.wv`, so the
+           * pair (this guard + the targeted injection) keeps every credential in its own jar.
+           */
+          if (autofill.villa === villa) injectAutofill();
         });
 
         function syncUrl(e) {
-          if (e.url && e.url !== 'about:blank') el.urlbox.textContent = e.url;
+          if (e.url && e.url !== 'about:blank') {
+            rec.url = e.url;
+            if (active()) el.urlbox.textContent = rec.url;
+          }
         }
-        el.portal.addEventListener('did-navigate', syncUrl);
-        el.portal.addEventListener('did-navigate-in-page', syncUrl);
+        wv.addEventListener('did-navigate', syncUrl);
+        wv.addEventListener('did-navigate-in-page', syncUrl);
 
-        el.portal.addEventListener('did-fail-load', function (e) {
+        wv.addEventListener('did-fail-load', function (e) {
           if (e.errorCode === -3 || !e.isMainFrame) return; // -3 = user-aborted
+          rec.loading = false;
+          rec.fail = {
+            url: e.validatedURL || TM30_URL,
+            why: e.errorDescription || 'network error',
+          };
+          if (active()) renderPortalChrome();
+        });
+      }
+
+      /**
+       * Repaint the SHARED chrome (urlbar, nav buttons, loading bar, portal message) from the
+       * ACTIVE record. Called on every switch and by the active webview's own events; it reads
+       * only `activePortal`, so a background webview can never paint here even by accident.
+       */
+      function renderPortalChrome() {
+        if (!activePortal) {
+          el.urlbox.textContent = TM30_URL;
+          el.back.disabled = true;
+          el.fwd.disabled = true;
+          el.reload.disabled = true;
           el.loadingBar.style.width = '0%';
+          el.portalMsg.classList.remove('hidden');
+          el.portalMsg.innerHTML =
+            '<div class="icon">◌</div>' +
+            '<div>Select a villa — its portal session opens here.</div>';
+          return;
+        }
+
+        var rec = activePortal;
+        el.urlbox.textContent = rec.url;
+        el.loadingBar.style.width = rec.loading ? '70%' : '0%';
+
+        var canBack = false;
+        var canFwd = false;
+        if (rec.ready) {
+          try {
+            canBack = rec.el.canGoBack();
+            canFwd = rec.el.canGoForward();
+          } catch (e) { /* detached mid-call — treat as not navigable */ }
+        }
+        el.back.disabled = !canBack;
+        el.fwd.disabled = !canFwd;
+        el.reload.disabled = !rec.ready;
+
+        if (rec.fail) {
           el.portalMsg.classList.remove('hidden');
           el.portalMsg.innerHTML =
             '<div class="icon">⚠️</div>' +
             '<div>Could not load <b></b></div>' +
             '<div class="hint"></div>';
-          el.portalMsg.querySelector('b').textContent = e.validatedURL || TM30_URL;
+          el.portalMsg.querySelector('b').textContent = rec.fail.url;
           el.portalMsg.querySelector('.hint').textContent =
-            (e.errorDescription || 'network error') +
+            rec.fail.why +
             ' — the portal is reached through your own session; try Reload, or open it by hand.';
+        } else if (!rec.everLoaded) {
+          el.portalMsg.classList.remove('hidden');
+          el.portalMsg.innerHTML =
+            '<div class="icon">◌</div>' +
+            '<div>Loading the portal…</div>';
+        } else {
+          el.portalMsg.classList.add('hidden');
+        }
+      }
+
+      /**
+       * Make `villa`'s webview the visible one. Creation is lazy; a SWITCH is a `.hidden`
+       * toggle and NOTHING else — no reload, no navigation. The "what 4e deliberately does
+       * not do on selection" ruling at the end of the 4e section, per-webview: the `src`
+       * attribute loaded the portal ONCE at creation, and selection after that only changes
+       * which webview the operator is looking at, preserving each villa's in-page state.
+       */
+      function showVillaPortal(villa) {
+        var next = villa ? ensureWebview(villa) : null;
+        if (activePortal === next) {
+          renderPortalChrome();
+          return;
+        }
+        if (activePortal) activePortal.el.classList.add('hidden');
+        activePortal = next;
+        if (next) next.el.classList.remove('hidden');
+        renderPortalChrome();
+      }
+
+      // ── right pane: chrome buttons + the pool switch ───────────────────────────────────
+      // No executeJavaScript here, no autofill (4e), no submit detection (4i). Portal NO-GO,
+      // 010 §8: ‹ › ⟳ are the HUMAN's controls over the pane they are looking at.
+      function mountPortal() {
+        el.back.addEventListener('click', function () {
+          if (activePortal && activePortal.el.canGoBack()) activePortal.el.goBack();
+        });
+        el.fwd.addEventListener('click', function () {
+          if (activePortal && activePortal.el.canGoForward()) activePortal.el.goForward();
+        });
+        el.reload.addEventListener('click', function () {
+          if (activePortal) activePortal.el.reload();
+        });
+
+        /**
+         * 🔴 This subscription is registered BEFORE `mountAutofill`'s (boot order at the
+         * bottom of the file): listeners run in registration order, so by the time 4e's
+         * listener handles a selection, the villa's webview EXISTS and is the active one, and
+         * `startAutofill` can resolve it. Do not reorder the boot calls.
+         */
+        onActiveVillaChange(function (ev) {
+          showVillaPortal(ev.villa);
+        });
+
+        renderPortalChrome();
+      }
+
+      /**
+       * ↻ fresh login — the per-villa session reset (A-WEB-4g part B).
+       *
+       * ┌─ 🔴 THE ONE PROGRAMMATIC NAVIGATION IN THIS FILE ──────────────────────────────────┐
+       * │ 010 §8 (Portal NO-GO) forbids auto-navigation, and that still stands: SELECTION     │
+       * │ never navigates anything. This is the single carve-out — it runs only from an       │
+       * │ explicit human click on the ↻ control, and it goes to exactly one place: TM30_URL,  │
+       * │ the portal root, so the operator can start a login over without restarting the app. │
+       * │ `loadURL()` because the element is attached — `.src` would silently no-op (4c), and │
+       * │ `partition` can never change on an attached element anyway.                         │
+       * └────────────────────────────────────────────────────────────────────────────────────┘
+       *
+       * Order (the 4g contract): forget the villa's session CUE → clear the partition's
+       * storage in the main process (`persist:tm30-` prefix enforced THERE) → reload the
+       * portal root in THAT villa's webview → re-arm exactly as on first selection. A failure
+       * at the native step is STATED in the status line and stops the navigation — silently
+       * showing a still-logged-in portal after claiming a reset is the one lie this control
+       * must not tell. Only THIS villa's `villaSession` entry is touched: the map stays
+       * villa-keyed (AMB-1), and the entry is display-only either way (the 🔴 on
+       * `state.villaSession` — clearing it revokes a cue, not an authorization).
+       *
+       * `clearStorageData` + `loadURL` inside the human's own webview are NOT Helper network
+       * calls — 014 §2.5 stands untouched.
+       */
+      function freshLogin(villa) {
+        delete state.villaSession[villa];
+        renderList();
+        renderCount();
+        renderStatusLine(); // the pill is already back to 🔒 log in / manual login
+
+        if (!window.tm30Native || !window.tm30Native.resetPortalSession) {
+          setStatusNote('fresh login unavailable — the native bridge did not load', 'st-none');
+          return;
+        }
+
+        var hadWebview = !!portalPool[villa];
+        window.tm30Native.resetPortalSession(partitionFor(villa)).then(function (res) {
+          if (!res || !res.ok) {
+            // 🔴 Loud, not silent (014 §7.9) — and no navigation on top of an uncleaned jar.
+            setStatusNote(
+              'fresh login failed — ' + ((res && res.error) || 'unknown error'), 'st-none'
+            );
+            return;
+          }
+
+          if (hadWebview) {
+            try {
+              portalPool[villa].el.loadURL(TM30_URL) // the 4g carve-out — see the box above
+                .catch(function () { /* real load failures surface via did-fail-load */ });
+            } catch (e) {
+              setStatusNote('fresh login failed — could not reload the portal pane', 'st-none');
+              return;
+            }
+          }
+          // No webview yet → nothing to reload: the selection below creates it, and its `src`
+          // attribute load IS the fresh navigation (4c — attribute before attach).
+
+          if (state.activeVilla !== villa) {
+            // Selecting the villa re-runs the whole first-selection flow: the pool switch
+            // (mountPortal's listener), then autofill-or-manual (mountAutofill's).
+            setActiveVilla(villa);
+            return;
+          }
+          // Already active: `setActiveVilla` would no-op, so re-arm here, exactly as
+          // `mountAutofill` does on a first selection.
+          var account = accountFor(villa);
+          if (account) startAutofill(villa, account);
+          else setPortalStatus(null); // manual login — the account slot already says so
         });
       }
 
@@ -1387,9 +1711,18 @@
       /**
        * The in-flight autofill, or an empty slot. Exactly ONE villa is ever pending: selecting a
        * second villa supersedes the first rather than racing it.
+       *
+       * 4g: `wv` is the pending villa's OWN pool webview. Every injection, teardown and
+       * `__tm30Filled` probe targets THAT element and never "the" portal — there is no single
+       * portal any more, and probing the wrong villa's webview would read the wrong document.
        */
-      var autofill = { villa: null, login: null, pass: null, token: null, watch: null };
+      var autofill = { villa: null, login: null, pass: null, token: null, watch: null, wv: null };
       var autofillSeq = 0;
+
+      /** The in-page teardown: kill the poller, blank the fill flag. Shared by both callers. */
+      var AUTOFILL_TEARDOWN =
+        'if (window.__tm30Autofill) { clearInterval(window.__tm30Autofill); window.__tm30Autofill = null; }' +
+        ' window.__tm30Filled = null;';
 
       /**
        * v1's `buildAutofillScript` (`window.html:163-206`), MIRRORED — the selectors are the
@@ -1496,6 +1829,7 @@
         autofill.login = null;
         autofill.pass = null;
         autofill.token = null;
+        autofill.wv = null;
       }
 
       /**
@@ -1514,14 +1848,12 @@
        * more. Ordering is not a thing to rely on here; not depending on it is free.
        */
       function stopAutofill() {
+        var wv = autofill.wv; // 4g: the teardown goes to the PENDING villa's webview
         var had = !!autofill.villa;
         clearAutofillSlot();
-        if (!had) return;
+        if (!had || !wv) return;
         try {
-          el.portal.executeJavaScript(
-            'if (window.__tm30Autofill) { clearInterval(window.__tm30Autofill); window.__tm30Autofill = null; }' +
-              ' window.__tm30Filled = null;'
-          ).catch(function () {});
+          wv.executeJavaScript(AUTOFILL_TEARDOWN).catch(function () {});
         } catch (e) {
           /* webview not attached — there is no poller to stop */
         }
@@ -1536,9 +1868,9 @@
        * (`window.html:197`) — it just only ever had one page to hook.
        */
       function injectAutofill() {
-        if (!autofill.villa) return;
+        if (!autofill.villa || !autofill.wv) return;
         try {
-          el.portal
+          autofill.wv // 4g: the pending villa's OWN webview, never a shared one
             .executeJavaScript(buildAutofillScript(autofill.login, autofill.pass, autofill.token))
             .catch(function (err) {
               console.warn('[tm30-helper] 4e: autofill injection was rejected', err);
@@ -1576,7 +1908,25 @@
        * is the one v1 shipped (`window.html:123`, `ждём капчу…`).
        */
       function startAutofill(villa, account) {
+        /**
+         * 4g: a superseded villa's poller used to die implicitly — the new injection's first
+         * line cleared it, because there was only ONE page. With per-villa webviews the
+         * predecessor lives in a DIFFERENT document the new injection never touches, so it
+         * would keep polling unwatched and eventually type its own villa's credentials into
+         * its own login page with nobody looking. Tear it down explicitly — and ONLY when it
+         * really is another webview: a same-webview teardown here would race the new injection
+         * (the ordering hazard documented on `stopAutofill`), and same-webview is exactly the
+         * case the injected script's own first line already covers.
+         */
+        var prevWv = autofill.wv;
         clearAutofillSlot(); // NOT stopAutofill — see the ordering note on it
+
+        var rec = ensureWebview(villa); // idempotent — mountPortal's listener normally made it
+        if (prevWv && prevWv !== rec.el) {
+          try {
+            prevWv.executeJavaScript(AUTOFILL_TEARDOWN).catch(function () {});
+          } catch (e) { /* not attached — no poller to stop */ }
+        }
 
         autofillSeq += 1;
         var token = 'tm30-fill-' + autofillSeq;
@@ -1584,6 +1934,7 @@
         autofill.login = account.login;
         autofill.pass = account.pass || '';
         autofill.token = token;
+        autofill.wv = rec.el;
 
         setPortalStatus('waiting for captcha…', 'st-none');
         injectAutofill();
@@ -1592,7 +1943,8 @@
           if (autofill.token !== token) return; // superseded by a later selection
           var probe;
           try {
-            probe = el.portal.executeJavaScript('window.__tm30Filled || null');
+            // 4g: probe the pending villa's own webview — token matched, so the slot is ours
+            probe = autofill.wv.executeJavaScript('window.__tm30Filled || null');
           } catch (e) {
             return;
           }
@@ -1630,10 +1982,9 @@
        *                          status line reads `no credentials — log in manually`.
        */
       function mountAutofill() {
-        // A navigation drops the injected poller; put it back for the villa still waiting.
-        el.portal.addEventListener('dom-ready', function () {
-          if (autofill.villa) injectAutofill();
-        });
+        // 4g: the dom-ready re-injection hook is no longer bound here — it is bound PER pool
+        // webview in `bindPortalListeners`, guarded by "this webview's villa === the pending
+        // autofill villa", so a background villa's navigation can never trigger an injection.
 
         onActiveVillaChange(function (ev) {
           if (!ev.villa) {
@@ -1668,18 +2019,22 @@
       }
 
       /**
-       * ⚠️ WHAT 4e DELIBERATELY DOES **NOT** DO ON SELECTION: navigate the webview to the portal.
+       * ⚠️ WHAT 4e DELIBERATELY DOES **NOT** DO ON SELECTION: navigate any webview.
        *
        * 014 §3 says "navigate the pane to the portal if needed", but that instruction predates
-       * the pane existing. The `src` ATTRIBUTE already points the webview at the portal from the
-       * first paint and is the single source of truth (4c's finding — assigning `.src` from
-       * script silently no-ops). By the time any villa can be selected, the portal is loaded.
+       * the pane existing. 4g's per-villa pool keeps the ruling, per-webview: a villa's webview
+       * loads TM30_URL ONCE, at CREATION, via its `src` ATTRIBUTE (4c's finding — assigning
+       * `.src` from script silently no-ops), and every selection after that only toggles which
+       * webview is visible. By the time a villa can be re-selected, its portal is loaded.
        *
        * So a selection-time navigation could only ever do one thing: yank the page out from under
        * a human who is mid-Turnstile, mid-upload, or mid-form, because they clicked a row to read
        * it. That is navigation automation, which is exactly what 010 §8 forbids, and it destroys
        * the session that autofill exists to help open. The human drives this pane; ‹ › ⟳ are
        * theirs. We inject into whatever they are looking at, and nothing else.
+       *
+       * The ONE navigation that exists at all is ↻ fresh login's reload to the portal root —
+       * human-click-initiated, never selection-driven. See the carve-out box on `freshLogin`.
        */
 
       // ── boot ───────────────────────────────────────────────────────────────────────────
@@ -1689,6 +2044,9 @@
       renderList(); // computes the buckets…
       renderCount(); // …which this reads. Order matters.
       renderStatusLine();
+      // 🔴 4g: mountPortal BEFORE mountAutofill — their `onActiveVillaChange` subscriptions run
+      // in registration order, and 4e's must find the villa's pool webview already created and
+      // active. See the note inside `mountPortal`.
       mountPortal();
       mountAutofill(); // 4e — subscribes to `onActiveVillaChange`; nothing fires until a click
 
@@ -1710,7 +2068,18 @@
         renderStatusLine: renderStatusLine,
         /** 4d's status-line slot (right-hand side). `null` clears. */
         setStatusNote: setStatusNote,
-        portal: el.portal,
+        /**
+         * 4g: the ACTIVE villa's webview — a getter, because there is one webview per villa
+         * now and "the portal" means whichever one the operator is looking at. Null before the
+         * first selection. The autofill harness and future tickets build against this seam.
+         */
+        get portal() { return activePortal ? activePortal.el : null; },
+
+        // ── 4g ──────────────────────────────────────────────────────────────────────────
+        /** The deterministic per-villa partition: `persist:tm30-v-<encodeURIComponent>`. */
+        partitionFor: partitionFor,
+        /** The ↻ handler — human-click-initiated per-villa session reset. */
+        freshLogin: freshLogin,
 
         // ── 4e ──────────────────────────────────────────────────────────────────────────
         /** Has credentials, has no session. A cred-less villa is NEVER locked. */

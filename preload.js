@@ -2,9 +2,11 @@
 
 /**
  * A-WEB-4d — the ONLY native seam the worklist pane needs.
+ * A-WEB-4g — added the third (and LAST) verb: `resetPortalSession`. The bridge stays
+ *            deliberately non-general — three named verbs, no pass-through.
  *
  * `app.html` runs with `contextIsolation` on and no node integration, so it cannot reach
- * `shell` or `webContents.downloadURL` by itself. This preload exposes exactly two verbs and
+ * `shell` or `webContents.downloadURL` by itself. This preload exposes exactly three verbs and
  * nothing else — it is deliberately not a general-purpose bridge.
  *
  * ── What this does NOT do ───────────────────────────────────────────────────────────────
@@ -34,4 +36,14 @@ contextBridge.exposeInMainWorld('tm30Native', {
      * @returns {Promise<{ok:boolean,error?:string}>}
      */
     openExternal: (url) => ipcRenderer.invoke('tm30:open-external', url),
+
+    /**
+     * A-WEB-4g: clears ONE villa partition's storage, so the operator can restart that villa's
+     * portal login (↻ fresh login) without restarting the app. The main-process handler refuses
+     * anything not prefixed `persist:tm30-`, so this verb can never touch the window's own
+     * session or any partition outside the Helper's per-villa scheme.
+     * @param {string} partition
+     * @returns {Promise<{ok:boolean,error?:string}>}
+     */
+    resetPortalSession: (partition) => ipcRenderer.invoke('tm30:reset-portal-session', partition),
 });

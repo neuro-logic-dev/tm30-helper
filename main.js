@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -168,9 +168,12 @@ function uniqueDownloadPath(dir, rawName) {
  * рендерер печатает его в строку статуса (`sheet downloaded ✓`), поэтому путь должен быть
  * тем, что лежит на диске, а не тем, что мы надеялись получить.
  *
- * ⚠️ `will-download` висит на сессии, а не на конкретном запросе, и ту же сессию использует
- * `<webview>` портала. Поэтому слушатель ставится ТОЛЬКО на время нашей загрузки и снимается
- * в `finish()` — иначе загрузка, начатая человеком в портале, приехала бы сюда.
+ * ⚠️ `will-download` висит на сессии, а не на конкретном запросе. Загрузка идёт через сессию
+ * ОКНА (`event.sender` — это app.html, его сессия — дефолтная), и с A-WEB-4g это уже НЕ та
+ * сессия, где живут webview портала: у каждой виллы своя партиция `persist:tm30-v-…`, так что
+ * загрузки, начатые человеком в портале, сюда физически не приезжают. Слушатель всё равно
+ * ставится ТОЛЬКО на время нашей загрузки и снимается в `finish()` — параллельные скачивания
+ * листов из самого окна не должны перехватывать друг друга.
  */
 ipcMain.handle('tm30:download-sheet', (event, rawUrl) => {
   if (!isHttpUrl(rawUrl)) return Promise.resolve({ ok: false, error: 'not an http(s) url' });
@@ -204,6 +207,30 @@ ipcMain.handle('tm30:download-sheet', (event, rawUrl) => {
     wc.session.on('will-download', onWillDownload);
     wc.downloadURL(String(rawUrl));
   });
+});
+
+/**
+ * A-WEB-4g: ↻ fresh login — сброс портальной сессии ОДНОЙ виллы.
+ *
+ * 🔴 Префикс `persist:tm30-` — единственная граница этого глагола, и она проверяется ЗДЕСЬ,
+ * в main, а не в renderer'е: renderer не должен уметь попросить очистку чужой партиции
+ * (в т.ч. дефолтной сессии, где живёт само окно и его загрузки листов). Всё, что не наше, —
+ * `{ok:false}` и НИЧЕГО не очищено.
+ *
+ * `session.fromPartition` создаёт партицию, если её ещё нет — очистка пустой партиции
+ * корректна и честно возвращает ok. Это не сетевой вызов хелпера (014 §2.5): стирается
+ * локальное хранилище, ни одного байта наружу.
+ */
+ipcMain.handle('tm30:reset-portal-session', async (_event, partition) => {
+  if (typeof partition !== 'string' || !partition.startsWith('persist:tm30-')) {
+    return { ok: false, error: 'not a tm30 partition' };
+  }
+  try {
+    await session.fromPartition(partition).clearStorageData();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
 });
 
 /** 📁 — отдаём ссылку настоящему браузеру человека. Открыть браузер ≠ сетевой вызов хелпера. */
