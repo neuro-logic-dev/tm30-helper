@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Прототип: TM30 аккаунты + браузер</title>
+<title>TM30 Helper</title>
 <style>
   :root {
     --bg: #f4f5f7;
@@ -10,8 +10,6 @@
     --border: #e1e4e8;
     --text: #1f2328;
     --muted: #656d76;
-    --accent: #2563eb;
-    --accent-soft: #eff4ff;
     --radius: 10px;
   }
   * { box-sizing: border-box; }
@@ -21,351 +19,29 @@
     background: var(--bg);
     color: var(--text);
     display: flex;
-    flex-direction: column;
-  }
-
-  header {
-    padding: 12px 20px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    font-size: 15px;
-    font-weight: 600;
-    flex: 0 0 auto;
-  }
-
-  .layout {
-    flex: 1;
-    display: flex;
-    gap: 16px;
-    padding: 16px;
-    min-height: 0;
-  }
-
-  /* ---------- Левая панель: таблица ---------- */
-  .sidebar {
-    flex: 0 0 400px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-  }
-  .sidebar .panel-title {
-    padding: 12px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    border-bottom: 1px solid var(--border);
-  }
-  .table-wrap { overflow: auto; flex: 1; }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13.5px;
-  }
-  thead th {
-    position: sticky;
-    top: 0;
-    background: var(--panel);
-    text-align: left;
-    font-weight: 600;
-    color: var(--muted);
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-  }
-  tbody td {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 220px;
-  }
-  tbody tr { cursor: pointer; transition: background .12s; }
-  tbody tr:hover { background: #f8f9fb; }
-  tbody tr.active { background: var(--accent-soft); }
-  tbody tr.active td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-  .login-cell { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-  .status-cell { font-size: 12px; }
-  .status-wait { color: #b26a00; }
-  .status-done { color: #1a7f37; font-weight: 600; }
-
-  /* ---------- Правая панель: браузер ---------- */
-  .browser {
-    flex: 1;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .browser-chrome {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    background: #fafbfc;
-  }
-  .traffic { display: flex; gap: 6px; }
-  .traffic span { width: 11px; height: 11px; border-radius: 50%; }
-  .traffic .r { background: #ff5f57; }
-  .traffic .y { background: #febc2e; }
-  .traffic .g { background: #28c840; }
-  .nav-btns { display: flex; gap: 4px; }
-  .nav-btns button {
-    border: none;
-    background: transparent;
-    font-size: 15px;
-    color: var(--muted);
-    cursor: pointer;
-    width: 28px; height: 28px;
-    border-radius: 6px;
-  }
-  .nav-btns button:hover:not(:disabled) { background: #eceef1; color: var(--text); }
-  .nav-btns button:disabled { opacity: .35; cursor: default; }
-  .address-bar {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: #eef0f3;
-    border-radius: 999px;
-    padding: 6px 14px;
-    font-size: 13px;
-    color: var(--muted);
-    font-family: ui-monospace, Menlo, monospace;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .address-bar .lock { flex: 0 0 auto; }
-  #address-text { overflow: hidden; text-overflow: ellipsis; }
-
-  .viewport { flex: 1; position: relative; min-height: 0; }
-  webview {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-  }
-  .placeholder {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    color: var(--muted);
-    font-size: 14px;
-    background: #fafbfc;
-    z-index: 1;
   }
-  .placeholder .icon { font-size: 40px; }
-  .hidden { display: none !important; }
-  .loading-bar {
-    position: absolute;
-    top: 0; left: 0;
-    height: 3px;
-    width: 0%;
-    background: var(--accent);
-    transition: width .4s ease;
-    z-index: 2;
+  main {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 40px;
+    max-width: 440px;
+    text-align: center;
   }
+  h1 { margin: 0 0 12px; font-size: 20px; }
+  p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .version { margin-top: 20px; font-size: 12px; }
 </style>
 </head>
 <body>
 
-<header>TM30 — аккаунты и встроенный браузер (автозаполнение после капчи)</header>
-
-<div class="layout">
-
-  <!-- Таблица аккаунтов -->
-  <aside class="sidebar">
-    <div class="panel-title">Аккаунты TM30</div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>Название</th><th>Логин</th><th>Статус</th></tr>
-        </thead>
-        <tbody id="site-rows"></tbody>
-      </table>
-    </div>
-  </aside>
-
-  <!-- Встроенный браузер -->
-  <section class="browser">
-    <div class="browser-chrome">
-      <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-      <div class="nav-btns">
-        <button id="btn-back" title="Назад" disabled>‹</button>
-        <button id="btn-fwd" title="Вперёд" disabled>›</button>
-        <button id="btn-reload" title="Обновить" disabled>⟳</button>
-      </div>
-      <div class="address-bar">
-        <span class="lock">🔒</span>
-        <span id="address-text">выберите аккаунт из таблицы</span>
-      </div>
-    </div>
-    <div class="viewport">
-      <div class="loading-bar" id="loading-bar"></div>
-      <webview id="frame" src="about:blank" allowpopups></webview>
-      <div class="placeholder" id="placeholder">
-        <div class="icon">🌐</div>
-        <div>Кликните по строке таблицы, чтобы открыть TM30 под этим аккаунтом</div>
-      </div>
-    </div>
-  </section>
-
-</div>
-
-<script>
-  const TM30_URL = "https://tm30.immigration.go.th";
-
-  // ЗДЕСЬ впишите свои реальные пары логин/пароль
-  const ACCOUNTS = [
-    { name: "TM30 — аккаунт 1", login: "user1@example.com", pass: "password1" },
-    { name: "TM30 — аккаунт 2", login: "user2@example.com", pass: "password2" },
-    { name: "TM30 — аккаунт 3", login: "user3@example.com", pass: "password3" },
-    { name: "TM30 — аккаунт 4", login: "user4@example.com", pass: "password4" },
-    { name: "TM30 — аккаунт 5", login: "user5@example.com", pass: "password5" },
-  ];
-
-  const rowsEl      = document.getElementById("site-rows");
-  const frame       = document.getElementById("frame");
-  const placeholder = document.getElementById("placeholder");
-  const addressText = document.getElementById("address-text");
-  const loadingBar  = document.getElementById("loading-bar");
-  const btnBack     = document.getElementById("btn-back");
-  const btnFwd      = document.getElementById("btn-fwd");
-  const btnReload   = document.getElementById("btn-reload");
-
-  let currentIndex = -1;
-
-  ACCOUNTS.forEach((acc, i) => {
-    const tr = document.createElement("tr");
-    tr.dataset.index = i;
-    tr.innerHTML = `
-      <td>${acc.name}</td>
-      <td class="login-cell">${acc.login}</td>
-      <td class="status-cell" id="status-${i}">—</td>`;
-    tr.addEventListener("click", () => openAccount(i));
-    rowsEl.appendChild(tr);
-  });
-
-  function setActiveRow(index) {
-    rowsEl.querySelectorAll("tr").forEach(tr =>
-      tr.classList.toggle("active", Number(tr.dataset.index) === index));
-  }
-
-  function setStatus(index, text, cls) {
-    const el = document.getElementById(`status-${index}`);
-    if (el) { el.textContent = text; el.className = `status-cell ${cls || ""}`; }
-  }
-
-  function openAccount(index) {
-    currentIndex = index;
-    setActiveRow(index);
-    ACCOUNTS.forEach((_, i) => { if (i !== index) setStatus(i, "—", ""); });
-    setStatus(index, "загрузка…", "status-wait");
-    placeholder.classList.add("hidden");
-    addressText.textContent = TM30_URL;
-    frame.src = TM30_URL + "?_acc=" + index; // параметр форсирует перезагрузку при клике по другой строке
-  }
-
-  // ---------- Автозаполнение после прохождения капчи ----------
-  // Скрипт инжектится в страницу и ждёт, пока Cloudflare Turnstile
-  // выдаст токен (заполнится input[name="cf-turnstile-response"]).
-  // Как только капча пройдена — подставляет логин/пароль текущей строки.
-  function buildAutofillScript(acc) {
-    return `
-      (function () {
-        if (window.__tm30Autofill) clearInterval(window.__tm30Autofill);
-        var LOGIN = ${JSON.stringify(acc.login)};
-        var PASS  = ${JSON.stringify(acc.pass)};
-
-        function setVal(el, v) {
-          var desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
-          desc.set.call(el, v);
-          el.dispatchEvent(new Event("input",  { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          el.dispatchEvent(new Event("keyup",  { bubbles: true }));
-        }
-
-        window.__tm30Autofill = setInterval(function () {
-          var user = document.getElementById("user");
-          var pass = document.getElementById("pass");
-          if (!user || !pass) return; // ещё не страница логина
-
-          var tokens = document.querySelectorAll('input[name="cf-turnstile-response"]');
-          var solved = Array.prototype.some.call(tokens, function (t) { return t.value && t.value.length > 0; });
-          if (!solved) return; // капча ещё не пройдена
-
-          setVal(user, LOGIN);
-          setVal(pass, PASS);
-          clearInterval(window.__tm30Autofill);
-          window.__tm30Autofill = null;
-          window.__tm30Filled = true;
-        }, 400);
-      })();
-    `;
-  }
-
-  frame.addEventListener("dom-ready", () => {
-    if (currentIndex < 0) return;
-    const idx = currentIndex;
-    frame.executeJavaScript(buildAutofillScript(ACCOUNTS[idx])).catch(() => {});
-    setStatus(idx, "ждём капчу…", "status-wait");
-
-    // следим, когда автозаполнение сработает, чтобы обновить статус в таблице
-    const watch = setInterval(() => {
-      if (currentIndex !== idx) { clearInterval(watch); return; }
-      frame.executeJavaScript("window.__tm30Filled === true").then(filled => {
-        if (filled) {
-          setStatus(idx, "✓ подставлено", "status-done");
-          clearInterval(watch);
-        }
-      }).catch(() => clearInterval(watch));
-    }, 600);
-  });
-
-  // ---------- Навигация ----------
-  btnBack.addEventListener("click", () => frame.canGoBack() && frame.goBack());
-  btnFwd.addEventListener("click", () => frame.canGoForward() && frame.goForward());
-  btnReload.addEventListener("click", () => frame.reload());
-
-  frame.addEventListener("did-start-loading", () => {
-    loadingBar.style.width = "70%";
-  });
-  frame.addEventListener("did-stop-loading", () => {
-    loadingBar.style.width = "100%";
-    setTimeout(() => { loadingBar.style.width = "0%"; }, 300);
-    btnBack.disabled   = !frame.canGoBack();
-    btnFwd.disabled    = !frame.canGoForward();
-    btnReload.disabled = false;
-  });
-  const syncAddress = e => { if (e.url && e.url !== "about:blank") addressText.textContent = e.url; };
-  frame.addEventListener("did-navigate", syncAddress);
-  frame.addEventListener("did-navigate-in-page", syncAddress);
-
-  frame.addEventListener("did-fail-load", e => {
-    if (e.errorCode === -3 || !e.isMainFrame) return;
-    loadingBar.style.width = "0%";
-    placeholder.classList.remove("hidden");
-    placeholder.innerHTML = `
-      <div class="icon">⚠️</div>
-      <div>Не удалось загрузить <b>${e.validatedURL || ""}</b></div>
-      <div style="font-size:12px">${e.errorDescription || "ошибка сети"}</div>`;
-    if (currentIndex >= 0) setStatus(currentIndex, "ошибка", "");
-  });
-</script>
+<main>
+  <h1>TM30 Helper</h1>
+  <p>Это приложение запускается из дашборда: нажмите кнопку TM30, чтобы открыть очередь подач.</p>
+  <p class="version">Версия 2.0.0</p>
+</main>
 
 </body>
 </html>
