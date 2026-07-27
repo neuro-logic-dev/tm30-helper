@@ -118,6 +118,25 @@ test('the session cookie gates /notify; /logout drops it again (fresh-login sema
     assert.equal(afterLogout.headers.get('location'), '/login');
 });
 
+test('GET /notify defaults to the CONSUMING uploader (hidden input + Browse button + clear-on-change)', async () => {
+    const cookie = sidOf(await login());
+    const html = await (await get('/notify', { cookie })).text();
+    // The input is still there (name="sheet") but hidden, behind a styled browse button…
+    assert.match(html, /type="file" name="sheet"/);
+    assert.match(html, /id="browse"/);
+    assert.match(html, /Browse file/);
+    // …and the page CLEARS the input on change — the mirror of the real portal's SPA uploader.
+    assert.match(html, /input\.value = ''/);
+});
+
+test('GET /notify?uploader=plain pins the classic keep-the-file input (no browse button, no script)', async () => {
+    const cookie = sidOf(await login());
+    const html = await (await get('/notify?uploader=plain', { cookie })).text();
+    assert.match(html, /type="file" name="sheet"/);
+    assert.doesNotMatch(html, /id="browse"/);
+    assert.doesNotMatch(html, /input\.value = ''/);
+});
+
 test('POST /notify without a session redirects to /login — no anonymous uploads', async () => {
     const res = await upload(null, await buildSheetBuffer(), 'x_TM30.xlsx');
     assert.equal(res.status, 302);

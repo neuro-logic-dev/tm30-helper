@@ -158,9 +158,13 @@ export function createMockPortal(opts = {}) {
                     return redirect(res, '/login', { 'Set-Cookie': `${COOKIE}=; Path=/; Max-Age=0` });
                 }
 
-                case 'GET /notify':
+                case 'GET /notify': {
                     if (user === undefined) return redirect(res, '/login');
-                    return html(res, 200, notifyPage({ user }));
+                    // ?uploader=plain pins the classic keep-the-file input; default is the
+                    // real portal's CONSUMING uploader (see notifyPage).
+                    const uploader = url.searchParams.get('uploader') === 'plain' ? 'plain' : 'consuming';
+                    return html(res, 200, notifyPage({ user, uploader }));
+                }
 
                 case 'POST /notify': {
                     if (user === undefined) return redirect(res, '/login');

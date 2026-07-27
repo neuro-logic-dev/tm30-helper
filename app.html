@@ -204,15 +204,16 @@
       .badge.b-await { background: transparent; color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
 
       /*
-        Row action bar — ONE fixed slot order for every state: status · xlsx · folder. Markup is
-        authored in that order too, so tab order matches what you see; the `order` values are a
-        guard, not the mechanism. Slots are always PRESENT: they disable, they never disappear,
-        so nothing shifts position as a row changes state (mockup H2).
+        Row action bar — ONE fixed slot order for every state: status · insert · xlsx · folder.
+        Markup is authored in that order too, so tab order matches what you see; the `order`
+        values are a guard, not the mechanism. Slots are always PRESENT: they disable, they
+        never disappear, so nothing shifts position as a row changes state (mockup H2).
       */
       .acts { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; order: 2; }
       .act-status { order: 1; margin-right: auto; }
-      .act-sheet { order: 2; }
-      .act-folder { order: 3; }
+      .act-insert { order: 2; }
+      .act-sheet { order: 3; }
+      .act-folder { order: 4; }
       .btn {
         font: inherit;
         font-size: 11.5px;
@@ -432,6 +433,33 @@
         z-index: 3;
       }
 
+      /*
+        T3-11 — the AUTO-INSERT notification. Helper chrome overlaid at the top edge of the
+        portal pane, NEVER injected into the portal page (010 §8): the auto-insert placed a
+        sheet the human did not pick by hand, so it must be VISIBLE that it happened. Filled
+        green (success), click to dismiss, self-hides after ~15s. Only shown on a successful
+        auto-insert; a loud verification failure gets the status line's do-NOT-submit, no banner.
+      */
+      .insert-banner {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: calc(100% - 28px);
+        z-index: 4;
+        padding: 9px 14px;
+        border-radius: 7px;
+        background: var(--ok);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
       .statusline {
         display: flex;
         align-items: center;
@@ -485,6 +513,11 @@
             <div class="icon">◌</div>
             <div>Select a villa — its portal session opens here.</div>
           </div>
+          <!--
+            T3-11: the auto-insert banner. Helper chrome (NOT injected into the portal page),
+            shown only after the Helper auto-placed a sheet into the import form. Click dismisses.
+          -->
+          <div class="insert-banner hidden" id="insert-banner"></div>
         </div>
         <div class="statusline" id="statusline"></div>
       </section>
@@ -564,6 +597,15 @@
         /** Transient status-line note, e.g. `sheet downloaded ✓`. */
         statusNote: null,
 
+        // ── T3-08 addition ──────────────────────────────────────────────────────────────
+        /**
+         * The filing_id whose ⇥ insert is currently in flight, or null. ONE insert at a time
+         * for the whole window (main.js additionally rejects a second insert on the same
+         * portal pane): the flow ends in a read-back verdict about ONE file in ONE input, and
+         * two overlapping flows would race each other's verdicts.
+         */
+        insertBusy: null,
+
         // ── T3-03 addition ──────────────────────────────────────────────────────────────
         /**
          * The deep link's `focus_filing_id`, kept ONLY when that filing is actually in this
@@ -590,6 +632,7 @@
         statusline: document.getElementById('statusline'),
         viewport: document.getElementById('viewport'),
         portalMsg: document.getElementById('portal-msg'),
+        insertBanner: document.getElementById('insert-banner'),
         urlbox: document.getElementById('urlbox'),
         loadingBar: document.getElementById('loading-bar'),
         back: document.getElementById('btn-back'),
@@ -637,6 +680,10 @@
         for (var i = 0; i < rows.length; i += 1) {
           rows[i].classList.toggle('sel', rows[i].getAttribute('data-villa') === villa);
         }
+
+        // T3-08: ⇥ insert is gated on the ACTIVE villa, so its buttons follow the selection —
+        // the same lightweight in-place update the `.sel` toggle above is, not a re-render.
+        syncAllInsertButtons();
 
         renderStatusLine();
         document.title = villa ? 'TM30 Helper — ' + villa : 'TM30 Helper';
@@ -846,6 +893,165 @@
           }
           renderList();
         });
+      }
+
+      /**
+       * ⇥ insert — T3-08, THE END OF THE MANUAL FILE PICK.
+       *
+       * The ⬇ button above still ends with a human choosing a file in the portal's picker —
+       * and a picker showing "name.xlsx" next to "name (1).xlsx" is exactly where the wrong
+       * villa's guests get filed. This verb closes that hole: the file identity is derived
+       * from the ROW (filing_id → sheet_download_url), main.js downloads it to a path only
+       * this filing owns ({userData}/tm30-sheets/{filing_id}/), places it straight into the
+       * portal page's file input (CDP primary / in-page fallback) and READS IT BACK before
+       * claiming anything. No picker ever opens; no human file choice exists in the path.
+       *
+       * ── Portal NO-GO (010 §8) status of this verb ──────────────────────────────────────
+       * The ONE DOM write is the file input's `.files` — the same "help the human's own
+       * session" class as 4e's login fields. NOTHING is clicked and NOTHING navigates:
+       * pressing the portal's submit stays the manager's own decision, in the portal pane.
+       *
+       * ── Why it is gated on the ACTIVE villa ────────────────────────────────────────────
+       * The insert lands in the pane the operator is LOOKING AT. Inserting into a background
+       * villa's pane would be an invisible mutation of a page mid-flow — so rows of every
+       * other villa keep the button disabled with the reason on hover (`syncInsertButton`),
+       * and main.js only ever targets the webview of the partition the ROW derives. Until the
+       * lock endpoint lands, this row-identity gate is the whole gating (T3-08 scope ruling).
+       */
+      function insertSheet(row, btn, opts) {
+        // `btn` is null on the T3-11 AUTO path (there was no click); `opts.auto` marks it, and is
+        // the ONLY behavioural delta — a successful auto-insert also raises the top-of-pane banner
+        // so the human sees a placement they did not make by hand. Everything else (the download,
+        // the engine, the read-back verdict, the status line, the row) is byte-identical to the
+        // manual ⇥, because auto calls this SAME flow. (T3-08 contract 6: manual ⇥ unchanged.)
+        opts = opts || {};
+        if (!row.sheet_download_url) return;
+        if (!window.tm30Native || !window.tm30Native.insertSheet) {
+          console.error('[tm30-helper] tm30Native.insertSheet is missing — preload did not load');
+          setStatusNote('insert unavailable — the native bridge did not load', 'st-none');
+          return;
+        }
+        // Belt only — `syncInsertButton` already disables both cases below.
+        if (row.villa !== state.activeVilla || state.insertBusy !== null) return;
+
+        state.insertBusy = row.filing_id;
+        syncAllInsertButtons();
+        if (btn) btn.textContent = '⇥ inserting…';
+        setStatusNote('inserting the sheet into the portal…', 'st-none');
+
+        window.tm30Native.insertSheet({
+          filing_id: row.filing_id,
+          url: row.sheet_download_url,
+          partition: partitionFor(row.villa),
+        }).then(function (res) {
+          state.insertBusy = null;
+          var local = (state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {});
+
+          if (res && res.ok) {
+            local.insert = res;
+            local.insertError = null;
+            // The sheet IS on disk now (the per-task copy) — the row honestly says so too.
+            local.downloadPath = res.path;
+            local.downloadError = null;
+            var mech = res.mechanism === 'inpage' ? ' (in-page fallback)' : '';
+            if (res.verification === 'accepted') {
+              /**
+               * Stage-2 SOFT success: a CONSUMING uploader (the real portal) read the file into
+               * its own state and cleared the input, so the byte read-back could not confirm it —
+               * but the filename IS on the page, so the insert WORKED. This is a ✓, never a
+               * mismatch: we just can't verify the bytes, so we point the human at the page's own
+               * preview before they save.
+               */
+              setStatusNote(
+                'inserted ✓ ' + res.filename + mech +
+                  ' — accepted by the page (input consumed); check the page preview before saving',
+                'st-ok'
+              );
+            } else {
+              setStatusNote(
+                'inserted ✓ ' + res.filename + mech +
+                  ' — check the portal pane and submit there yourself',
+                'st-ok'
+              );
+            }
+            // T3-11: only the AUTO path raises the banner — a manual ⇥ was a click the operator
+            // already watched, so its behaviour stays exactly as T3-08 shipped it (contract 6).
+            if (opts.auto) showInsertBanner(row.villa, res.filename);
+          } else {
+            local.insert = null;
+            /**
+             * 🔴 Failure honesty (014 §7.9 + T3-08 contract 6): every stage fails with ITS
+             * OWN words, and the verification stage adds the one instruction that matters —
+             * do NOT submit. Falling back to "the manager picks by hand" happens only out
+             * loud, in this message, never silently.
+             */
+            var why = (res && res.error) || 'unknown error';
+            if (res && res.stage === 'verify') {
+              local.insertError =
+                'verification MISMATCH — do NOT submit: ' + why +
+                '. Retry the insert, or upload by hand via ⬇ xlsx.';
+              setStatusNote('insert FAILED verification — do NOT submit · ' + why, 'st-none');
+            } else {
+              local.insertError = why;
+              setStatusNote('insert failed — ' + why, 'st-none');
+            }
+          }
+          renderList();
+        });
+      }
+
+      /**
+       * One ⇥ button's disabled state + hover reason, from the current shell state. Called at
+       * render time AND by `setActiveVilla`/`insertSheet` in place — the button must follow
+       * the selection without a full re-render (the row's other slots never move).
+       */
+      function syncInsertButton(btn) {
+        var villa = btn.getAttribute('data-villa');
+        if (btn.getAttribute('data-has-sheet') !== '1') {
+          btn.disabled = true;
+          btn.title = 'The sheet is generated from D-2 — nothing to insert yet.';
+        } else if (state.insertBusy !== null) {
+          btn.disabled = true;
+          btn.title = 'Another insert is still running — one at a time.';
+        } else if (villa !== state.activeVilla) {
+          btn.disabled = true;
+          btn.title =
+            'Select this villa first — the sheet is inserted into the ACTIVE villa’s ' +
+            'portal pane, the one you are looking at.';
+        } else {
+          btn.disabled = false;
+          btn.title =
+            'Download this row’s sheet and place it into the portal’s file input — ' +
+            'no file picker, no wrong-file risk. You still press the portal’s own submit.';
+        }
+      }
+
+      function syncAllInsertButtons() {
+        var btns = el.list.querySelectorAll('.act-insert');
+        for (var i = 0; i < btns.length; i += 1) syncInsertButton(btns[i]);
+      }
+
+      /**
+       * T3-11 — the auto-insert banner: raise it, or drop it. The banner is a single shared
+       * chrome element floating at the top of the portal pane; it belongs to whatever pane is
+       * active, so a villa switch hides it (never let it describe the wrong villa's page). It
+       * self-hides after ~15s and dismisses on click; the click handler is bound once at boot.
+       */
+      var bannerTimer = null;
+      function showInsertBanner(villa, filename) {
+        el.insertBanner.textContent =
+          '📎 Sheet attached: ' + filename + ' — check the preview and press Save';
+        el.insertBanner.classList.remove('hidden');
+        if (bannerTimer) clearTimeout(bannerTimer);
+        bannerTimer = setTimeout(hideInsertBanner, 15000);
+      }
+      function hideInsertBanner() {
+        el.insertBanner.classList.add('hidden');
+        el.insertBanner.textContent = '';
+        if (bannerTimer) {
+          clearTimeout(bannerTimer);
+          bannerTimer = null;
+        }
       }
 
       /** 📁 — hand the Drive folder to the human's real browser (005 §8.3.1 escape hatch). */
@@ -1064,6 +1270,24 @@
           });
         }
 
+        /**
+         * T3-08: ⇥ insert — the no-picker upload path. The button's disabled state + hover
+         * reason live in `syncInsertButton`, because they follow the ACTIVE villa and must be
+         * updatable in place by `setActiveVilla` without a re-render. Slot always present,
+         * disabled not hidden, like everything else in this bar (mockup H2).
+         */
+        var insertBtn = document.createElement('button');
+        insertBtn.type = 'button';
+        insertBtn.className = 'btn act-insert';
+        insertBtn.textContent = state.insertBusy === row.filing_id ? '⇥ inserting…' : '⇥ insert';
+        insertBtn.setAttribute('data-villa', row.villa);
+        if (row.sheet_download_url) insertBtn.setAttribute('data-has-sheet', '1');
+        syncInsertButton(insertBtn);
+        insertBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          insertSheet(row, insertBtn);
+        });
+
         var sheetBtn = document.createElement('button');
         sheetBtn.type = 'button';
         sheetBtn.className = 'btn act-sheet';
@@ -1093,6 +1317,7 @@
         });
 
         acts.appendChild(statusBtn);
+        acts.appendChild(insertBtn);
         acts.appendChild(sheetBtn);
         acts.appendChild(folderBtn);
         box.appendChild(acts);
@@ -1103,6 +1328,9 @@
         else if (kind !== 'approved' && row.status !== 'submitted' && !canHandBack(row))
           // 4f: stated on the row, not just hidden in a tooltip on a greyed button.
           msg = 'No usable return link on this row — reopen the Helper from the web tab.';
+        else if (local.insertError)
+          // T3-08: already carries the do-NOT-submit instruction when verification failed.
+          msg = 'insert failed — ' + local.insertError;
         else if (local.downloadError) msg = 'download failed — ' + local.downloadError;
         else if (local.submitted && row.status !== 'submitted')
           /**
@@ -1112,6 +1340,9 @@
            */
           msg = 'Marked here after opening the web confirm — the Helper cannot see whether it ' +
                 'was recorded. The real status comes back with the next worklist.';
+        else if (local.insert)
+          msg = 'inserted into the portal ✓ ' + local.insert.filename +
+                ' — submission stays yours, in the portal pane.';
         else if (local.downloadPath) msg = 'sheet downloaded ✓ · ' + local.downloadPath;
         else if (kind === 'nosheet') msg = 'Sheet is generated from D-2 — nothing to upload yet.';
         else if (kind === 'awaiting') msg = 'Sent to immigration — verdict not back yet.';
@@ -1502,6 +1733,9 @@
 
         wv.addEventListener('dom-ready', function () {
           rec.ready = true;
+          // T3-11: a fresh document is a new page appearance — re-arm the auto-insert one-shot so
+          // a reload/renavigation to the import form fires again (design contract 3).
+          rec.autoInsertFired = false;
           if (active()) renderPortalChrome();
           /**
            * 4e's re-injection hook, per webview (4g): a navigation wiped the injected poller,
@@ -1514,6 +1748,12 @@
         });
 
         function syncUrl(e) {
+          // T3-11: a navigation (full OR SPA in-page route change, e.g. arriving at the real
+          // portal's #/external/ifa/import) is a new page appearance — re-arm the one-shot, and
+          // drop the banner: it described the page we just left, so it must not hover over the
+          // next one. (The auto-insert that follows raises a fresh banner if it succeeds.)
+          rec.autoInsertFired = false;
+          if (active()) hideInsertBanner();
           if (e.url && e.url !== 'about:blank') {
             rec.url = e.url;
             if (active()) el.urlbox.textContent = rec.url;
@@ -2063,6 +2303,187 @@
        * human-click-initiated, never selection-driven. See the carve-out box on `freshLogin`.
        */
 
+      // ═══════════════════════════════════════════════════════════════════════════════════
+      // T3-11 — AUTO-INSERT: place the task's sheet into the portal's import form the moment the
+      // form appears, so the manager never has to press ⇥ for the ordinary one-task case.
+      //
+      // ┌─ 🔴 PORTAL NO-GO still holds (010 §8) ─────────────────────────────────────────────┐
+      // │ Auto-insert calls the SAME `insertSheet` flow the button does. That flow's ONE DOM   │
+      // │ write is the file input's `.files` (T3-08) — it never clicks «Show data from Excel», │
+      // │ never Save, never navigates, never touches another control. Auto-insert adds no new  │
+      // │ portal write; it only decides WHEN to run the existing one, and shows a banner.      │
+      // └────────────────────────────────────────────────────────────────────────────────────┘
+      //
+      // It mirrors 4e's arming idiom: a per-selection watcher polls the ACTIVE villa's webview
+      // (there is no single portal — one webview per villa) for the import form being present AND
+      // empty, scoped by a token so a villa switch supersedes rather than races. THREE fail-safes
+      // keep it from ever filing the wrong sheet or fighting the human:
+      //   · CANDIDATE (never guess): fires only when the target is unambiguous — the focused row
+      //     if it is this villa's and sheet-ready, else the villa's SOLE sheet-ready row, else
+      //     nothing but a laconic hint to press ⇥ by hand.
+      //   · ONE-SHOT: at most once per page appearance per pane. Re-arms only when the form is
+      //     seen ABSENT and then present-and-empty again (a reload/renavigation) — a human
+      //     clearing or changing the chosen file is NOT a re-trigger. The `autoInsertFired` flag
+      //     lives on the pool record so it survives villa switches, and is reset by navigation.
+      //   · A loud verify failure does NOT auto-retry: manual ⇥ stays the retry path, unchanged.
+      // ═══════════════════════════════════════════════════════════════════════════════════
+
+      /** ~half a second, in 4e's cadence band (AUTOFILL_POLL_MS 400 / FILLED_WATCH_MS 600). */
+      var AUTO_INSERT_POLL_MS = 500;
+
+      /**
+       * The in-page probe: is the import form present, and is it EMPTY (no file chosen yet)?
+       *
+       *   present — a file input exists. On the real portal the uploader lives at the SPA route
+       *             `#/external/ifa/import`; if there IS a hash route and it is not that page the
+       *             form cannot be here, a cheap pre-filter. The mock has no hash, so an empty
+       *             hash never blocks and form presence alone decides (as the design requires).
+       *   empty   — the input holds no File, AND the page shows no chosen FILENAME. A consuming
+       *             uploader (the real portal, and the mock's default) clears the input on change
+       *             and echoes the name into its own display box, so `input.files` empties through
+       *             no fault of ours; the filename echo is what says "a file is already chosen".
+       *             The always-present static hint text mentions a bare ".xlsx" with no name in
+       *             front of the dot — a filename-SHAPED token (a name char immediately before
+       *             ".xlsx") is what distinguishes a real chosen file from that hint, so the hint
+       *             never reads as "not empty" and the form never looks perpetually occupied.
+       */
+      var AUTO_INSERT_PROBE = `
+        (function () {
+          var hash = location.hash || '';
+          if (hash && hash.indexOf('/external/ifa/import') < 0) return { present: false, empty: false };
+          var input = document.querySelector('input[type="file"]');
+          if (!input) return { present: false, empty: false };
+          if (input.files && input.files.length > 0) return { present: true, empty: false };
+          var txt = ((document.body && document.body.innerText) || '').toLowerCase();
+          var idx = txt.indexOf('.xlsx');
+          var hasName = false;
+          while (idx > 0) {
+            var c = txt.charAt(idx - 1);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '_' || c === '-') { hasName = true; break; }
+            idx = txt.indexOf('.xlsx', idx + 1);
+          }
+          return { present: true, empty: !hasName };
+        })()
+      `;
+
+      /**
+       * Which row auto-insert would file for `villa`, or none. The fail-safe from the design,
+       * verbatim: (a) the focused row if it is THIS villa's and sheet-ready with a url; else
+       * (b) the villa's SOLE sheet-ready-with-url row; else none (ambiguous or nothing to file).
+       * Never a guess between two eligible rows.
+       */
+      function resolveAutoInsertCandidate(villa) {
+        var ready = state.worklist.filter(function (r) {
+          return r.villa === villa && r.status === 'sheet_ready' && r.sheet_download_url;
+        });
+        if (state.focusFilingId !== null && state.focusFilingId !== undefined) {
+          for (var i = 0; i < ready.length; i += 1) {
+            if (ready[i].filing_id === state.focusFilingId) return { row: ready[i], reason: 'focus' };
+          }
+        }
+        if (ready.length === 1) return { row: ready[0], reason: 'sole' };
+        return { row: null, reason: ready.length === 0 ? 'none' : 'ambiguous', count: ready.length };
+      }
+
+      /** The active-villa auto-insert watcher, or an empty slot (mirrors `autofill`). */
+      var autoInsert = { villa: null, wv: null, watch: null, token: null };
+      var autoInsertSeq = 0;
+
+      /** Forget the pending villa and stop polling (renderer-side only — no in-page teardown). */
+      function stopAutoInsertWatch() {
+        if (autoInsert.watch) {
+          clearInterval(autoInsert.watch);
+          autoInsert.watch = null;
+        }
+        autoInsert.villa = null;
+        autoInsert.wv = null;
+        autoInsert.token = null;
+      }
+
+      /**
+       * The one shot for `villa` at this page appearance. Called by the watcher when the import
+       * form is present, empty, not-yet-fired and no other insert is in flight — and it consumes
+       * the one-shot before this, so an ambiguous target still steps aside for exactly one page
+       * appearance rather than re-hinting every tick.
+       */
+      function fireAutoInsert(villa) {
+        var cand = resolveAutoInsertCandidate(villa);
+        if (!cand.row) {
+          // Ambiguous or nothing eligible: never guess. Point the human at manual ⇥, laconically.
+          setStatusNote('select a task and press ⇥ insert', 'st-none');
+          console.log(
+            '[tm30-helper] T3-11: import form ready for "' + villa + '" but the target is ' +
+              cand.reason + ' — no auto-insert; manual ⇥ stays available'
+          );
+          return;
+        }
+        var btn = el.list.querySelector(
+          '.row[data-filing-id="' + cand.row.filing_id + '"] .act-insert'
+        );
+        console.log(
+          '[tm30-helper] T3-11: auto-inserting filing ' + cand.row.filing_id +
+            ' (' + cand.reason + ') into "' + villa + '"'
+        );
+        insertSheet(cand.row, btn, { auto: true }); // the SAME flow the button runs
+      }
+
+      /**
+       * Arm auto-insert for `villa`'s webview: supersede any previous watcher, then poll THIS
+       * webview for the present-and-empty import form. The `autoInsertFired` flag lives on the
+       * pool record (survives villa switches — the one-shot is per PAGE, not per selection); the
+       * watcher resets it whenever the form is seen ABSENT, and navigation resets it too.
+       */
+      function armAutoInsert(villa) {
+        stopAutoInsertWatch();
+        if (!villa) return;
+        var rec = ensureWebview(villa);
+        autoInsertSeq += 1;
+        var token = 'tm30-autoins-' + autoInsertSeq;
+        autoInsert.villa = villa;
+        autoInsert.wv = rec.el;
+        autoInsert.token = token;
+
+        autoInsert.watch = setInterval(function () {
+          if (autoInsert.token !== token) return; // superseded by a later selection
+          var probe;
+          try {
+            probe = autoInsert.wv.executeJavaScript(AUTO_INSERT_PROBE);
+          } catch (e) {
+            return; // webview not attached — try next tick
+          }
+          probe
+            .then(function (p) {
+              if (autoInsert.token !== token) return;
+              var r = portalPool[villa];
+              if (!r) return;
+              if (!p || !p.present) {
+                r.autoInsertFired = false; // form gone → re-arm for its next appearance
+                return;
+              }
+              if (r.autoInsertFired) return; // already fired for this appearance (one-shot)
+              if (!p.empty) return; // the human already chose a file — never fight them
+              if (state.insertBusy !== null) return; // an insert is running — do not consume yet
+              r.autoInsertFired = true; // consume the one-shot BEFORE firing (any verdict)
+              fireAutoInsert(villa);
+            })
+            .catch(function () {
+              // Mid-navigation probe rejected — keep watching; the next tick reads the new page.
+            });
+        }, AUTO_INSERT_POLL_MS);
+      }
+
+      /**
+       * 4c fires `onActiveVillaChange` on every selection; auto-insert re-arms on the new villa
+       * and drops the banner (it belongs to the pane you were looking at, never the next one).
+       * Registered AFTER `mountPortal`'s subscription so the villa's webview already exists.
+       */
+      function mountAutoInsert() {
+        onActiveVillaChange(function (ev) {
+          hideInsertBanner();
+          armAutoInsert(ev.villa);
+        });
+      }
+
       // ── boot ───────────────────────────────────────────────────────────────────────────
       var payload = readPayload();
       state.worklist = Array.isArray(payload.worklist) ? payload.worklist : [];
@@ -2101,6 +2522,11 @@
       // active. See the note inside `mountPortal`.
       mountPortal();
       mountAutofill(); // 4e — subscribes to `onActiveVillaChange`; nothing fires until a click
+      // T3-11: subscribe AFTER mountPortal so the villa's webview already exists when a selection
+      // arms the watcher. Independent of 4e (login vs. upload-form arming) — order between them
+      // does not matter. The banner dismiss-on-click is bound here, once.
+      mountAutoInsert();
+      el.insertBanner.addEventListener('click', hideInsertBanner);
 
       /**
        * T3-03: the one-time INITIAL-BOOT auto-select — deliberately the SAME call a human villa
@@ -2166,6 +2592,14 @@
         markSubmitted: markSubmitted,
         /** Whether a row carries a usable `return_url` at all (014 §7.9). */
         canHandBack: canHandBack,
+
+        // ── T3-11 ─────────────────────────────────────────────────────────────────────
+        /** Which row auto-insert would file for a villa (or none) — asserted by the harness. */
+        resolveAutoInsertCandidate: resolveAutoInsertCandidate,
+        /** The in-flight auto-insert watcher slot (villa/token), for inspection. */
+        autoInsert: autoInsert,
+        /** Drop the auto-insert banner (used by the harness to reset between scenarios). */
+        hideInsertBanner: hideInsertBanner,
       };
     </script>
   </body>

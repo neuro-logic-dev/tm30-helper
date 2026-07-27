@@ -2,11 +2,12 @@
 
 /**
  * A-WEB-4d — the ONLY native seam the worklist pane needs.
- * A-WEB-4g — added the third (and LAST) verb: `resetPortalSession`. The bridge stays
- *            deliberately non-general — three named verbs, no pass-through.
+ * A-WEB-4g — added the third verb: `resetPortalSession`.
+ * T3-08    — added the fourth verb: `insertSheet`. The bridge stays deliberately non-general —
+ *            four named verbs, no pass-through.
  *
  * `app.html` runs with `contextIsolation` on and no node integration, so it cannot reach
- * `shell` or `webContents.downloadURL` by itself. This preload exposes exactly three verbs and
+ * `shell` or `webContents.downloadURL` by itself. This preload exposes exactly four verbs and
  * nothing else — it is deliberately not a general-purpose bridge.
  *
  * ── What this does NOT do ───────────────────────────────────────────────────────────────
@@ -46,4 +47,22 @@ contextBridge.exposeInMainWorld('tm30Native', {
      * @returns {Promise<{ok:boolean,error?:string}>}
      */
     resetPortalSession: (partition) => ipcRenderer.invoke('tm30:reset-portal-session', partition),
+
+    /**
+     * T3-08: downloads the row's sheet to its PER-TASK path and places it into the villa's
+     * portal file input programmatically (CDP primary, in-page fallback, read-back verified in
+     * main) — no file picker, so a wrong-file upload is structurally impossible. Only
+     * row-derived data crosses (the fields are picked explicitly, never passed through): main
+     * re-derives the on-disk path from filing_id + url, and the partition is prefix-guarded
+     * there exactly like `resetPortalSession`'s.
+     * @param {{filing_id:number, url:string, partition:string}} req
+     * @returns {Promise<{ok:true,filename:string,path:string,size:number,mechanism:'cdp'|'inpage',
+     *   cdpEvents:{input:boolean,change:boolean}|null, dispatchedEvents:boolean, fellBack:string|null}
+     *   |{ok:false,stage:string,error:string}>}
+     */
+    insertSheet: (req) => ipcRenderer.invoke('tm30:insert-sheet', {
+        filing_id: req && req.filing_id,
+        url: req && req.url,
+        partition: req && req.partition,
+    }),
 });

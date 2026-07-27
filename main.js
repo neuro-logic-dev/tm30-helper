@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const { parseDeepLink, DeepLinkKind, PROTOCOL } = require('./deeplink');
+const { registerInsertSheet } = require('./insert-sheet');
 
 // ---------- Single instance ----------
 // Повторный запуск (в т.ч. по deep link на Win/Linux) пробрасывается
@@ -247,6 +248,15 @@ ipcMain.handle('tm30:reset-portal-session', async (_event, partition) => {
     return { ok: false, error: String((err && err.message) || err) };
   }
 });
+
+/**
+ * T3-08: ⇥ insert — скачивание листа в per-task каталог ({userData}/tm30-sheets/{filing_id}/)
+ * + программная подстановка файла в input[type=file] портальной webview (CDP primary, in-page
+ * fallback, read-back verification). Весь движок живёт в ./insert-sheet.js, чтобы insert-харнесс
+ * (который, как и autofill-харнесс, бутается САМ вместо main.js) регистрировал ТОТ ЖЕ
+ * production-обработчик, а не дрейфующую копию.
+ */
+registerInsertSheet();
 
 /** 📁 — отдаём ссылку настоящему браузеру человека. Открыть браузер ≠ сетевой вызов хелпера. */
 ipcMain.handle('tm30:open-external', async (_event, rawUrl) => {

@@ -17,6 +17,7 @@
       "main.js",
       "preload.js",
       "deeplink.js",
+      "insert-sheet.js",
       "index.html",
       "window.html",
       "app.html"

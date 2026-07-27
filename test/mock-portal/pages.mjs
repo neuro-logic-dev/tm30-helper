@@ -35,6 +35,7 @@ const STYLE = `
   input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: 7px 9px; font: inherit; border: 1px solid #bbc; border-radius: 5px; }
   button { margin-top: 14px; padding: 8px 18px; font: inherit; border: 1px solid #1f3a6d; border-radius: 5px; background: #27509b; color: #fff; cursor: pointer; }
   button.ghost { background: #eef2fa; color: #1f3a6d; }
+  .filebox { margin: 10px 0; padding: 8px 11px; background: #f7f8fb; border: 1px dashed #bcc; border-radius: 5px; font-size: 13px; color: #445; }
   #turnstile { margin: 14px 0; padding: 12px; background: #eef; border-radius: 6px; font-size: 12px; }
   .error { margin: 12px 0; padding: 10px 12px; background: #fdecea; border: 1px solid #e5b4ae; border-radius: 6px; color: #8a2620; }
   .ok { color: #1c7a3d; }
@@ -94,18 +95,74 @@ export function loginPage({ error = null } = {}) {
   </script>`);
 }
 
-/** GET /notify — the accommodation-notify upload page (behind the session cookie). */
-export function notifyPage({ user = '' } = {}) {
-    return page('TM30 mock — Inform Accommodation', `
+/**
+ * GET /notify — the accommodation-notify upload page (behind the session cookie).
+ *
+ * Two uploader shapes, chosen by `?uploader=`:
+ *
+ *   · DEFAULT (consuming) — mirrors the REAL portal: a hidden `<input type=file>` behind a
+ *     filename display box + a styled «เลือกไฟล์ / Browse file» button. On `change` the page
+ *     copies the File into its own state, echoes the name into the display box, and CLEARS the
+ *     input (`value=''`). This is exactly what defeats a naïve byte read-back — the Helper's
+ *     insert lands, the page consumes it, and `input.files` is empty a tick later. On submit the
+ *     held File is reattached so the normal multipart POST still carries it.
+ *   · `?uploader=plain` — the classic visible `<input type=file>` that KEEPS the file. Pin this
+ *     when a test wants the stage-1 byte read-back to succeed against a non-consuming input.
+ */
+export function notifyPage({ user = '', uploader = 'consuming' } = {}) {
+    const signedIn = `<p>Signed in as <b>${escapeHtml(user)}</b> · <a href="/logout">sign out</a></p>
+    <p>Upload the TM30 sheet (<code>.xlsx</code>, worksheet «แบบแจ้งที่พัก Inform Accom», 9 columns).</p>`;
+
+    if (uploader === 'plain') {
+        return page('TM30 mock — Inform Accommodation', `
   <div class="box">
     <h3 style="margin-top:0">แจ้งที่พัก / Inform Accommodation — import Excel</h3>
-    <p>Signed in as <b>${escapeHtml(user)}</b> · <a href="/logout">sign out</a></p>
-    <p>Upload the TM30 sheet (<code>.xlsx</code>, worksheet «แบบแจ้งที่พัก Inform Accom», 9 columns).</p>
+    ${signedIn}
     <form method="POST" action="/notify" enctype="multipart/form-data">
       <input type="file" name="sheet" id="sheet" accept=".xlsx" required />
       <button type="submit">Upload &amp; validate</button>
     </form>
   </div>`);
+    }
+
+    // The CONSUMING uploader — the default, the one the real portal uses.
+    return page('TM30 mock — Inform Accommodation', `
+  <div class="box">
+    <h3 style="margin-top:0">แจ้งที่พัก / Inform Accommodation — import Excel</h3>
+    ${signedIn}
+    <form method="POST" action="/notify" enctype="multipart/form-data" id="notifyform">
+      <input type="file" name="sheet" id="sheet" accept=".xlsx" style="display:none" />
+      <div id="filebox" class="filebox">ยังไม่ได้เลือกไฟล์ — no file selected</div>
+      <button type="button" class="ghost" id="browse">เลือกไฟล์ / Browse file</button>
+      <button type="submit">Upload &amp; validate</button>
+    </form>
+  </div>
+  <script>
+    // The SPA uploader: browse → the hidden input; on change, copy the File into page state,
+    // echo the name, and CLEAR the input (this is what empties input.files under the Helper).
+    (function () {
+      var input = document.getElementById('sheet');
+      var box = document.getElementById('filebox');
+      var form = document.getElementById('notifyform');
+      var held = null;
+      document.getElementById('browse').addEventListener('click', function () { input.click(); });
+      input.addEventListener('change', function () {
+        var f = input.files && input.files[0];
+        if (!f) return;
+        held = f;
+        box.textContent = f.name;
+        input.value = ''; // CONSUME: the input no longer holds the File — only page state does
+        console.log('[mock-portal] consuming uploader took "' + f.name + '" and cleared the input');
+      });
+      // On submit, reattach the held File so the normal multipart POST carries it to /notify.
+      form.addEventListener('submit', function () {
+        if (!held) return;
+        var dt = new DataTransfer();
+        dt.items.add(held);
+        input.files = dt.files;
+      });
+    })();
+  </script>`);
 }
 
 /** ACCEPT → receipt with a generated number + the parsed-guest summary table. */
