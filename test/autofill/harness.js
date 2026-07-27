@@ -32,7 +32,7 @@ const http = require('http');
 const fs = require('fs');
 
 const HELPER = path.resolve(__dirname, '..', '..'); // desktop/tm30-helper
-const { b64url, SURIYAN, ANDA } = require('./fixture.js');
+const { b64url, b64urlFocus, FOCUS_FILING_ID, SURIYAN, ANDA } = require('./fixture.js');
 const PAGE = fs.readFileSync(path.join(__dirname, 'fake-portal.html'), 'utf8');
 
 const out = (s) => process.stdout.write(s + '\n');
@@ -697,6 +697,58 @@ app.whenReady().then(async () => {
       check('…and that one call site targets TM30_URL and nothing else',
         code.length === 1 && /loadURL\(TM30_URL\)/.test(code[0][1]), code.map(([, l]) => l.trim()));
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  out('');
+  out('════ 15 — focus_filing_id (T3-03): boot auto-selects the focused villa ═══════');
+  out('   (scenario 1 is the other half: the SAME payload WITHOUT the field boots with');
+  out('    nothing selected, an empty pool and no autofill pending — behavior unchanged.)');
+  {
+    // A fresh boot of the SHIPPED app.html with the focused payload — exactly what main.js's
+    // openWorklistWindow produces for a focused deep link. Every v2 link opens a NEW window,
+    // so focus is a boot-only concern; reloading here is that new window.
+    await win.loadFile(path.join(HELPER, 'app.html'), { query: { d: b64urlFocus } });
+    await sleep(1500); // boot + the focused villa's webview creation; fake portal at t≈1s
+
+    const s = await R(SNAP);
+    show(`boot with focus_filing_id=${FOCUS_FILING_ID} (Villa Anda)`, s);
+    check('🔴 the focused villa was auto-selected AT BOOT — no human click',
+      s.activePortal === 'Villa Anda', s.activePortal);
+    check('its webview was booted from the pool, visible, on its OWN persist: partition',
+      poolOf(s, 'Villa Anda') &&
+        poolOf(s, 'Villa Anda').partition === PART('Villa Anda') &&
+        poolOf(s, 'Villa Anda').hidden === false, s.pool);
+    check('ONLY the focused villa\'s webview was booted — the pool stays lazy for the rest',
+      s.pool.length === 1, s.pool);
+    check('🔴 autofill armed exactly as on a human click (pending + waiting for captcha…)',
+      s.pending.villa === 'Villa Anda' && /waiting for captcha…/.test(s.status), s);
+
+    const focus = await R(
+      '(function () {' +
+      '  var hits = document.querySelectorAll(".row.focused");' +
+      '  return {' +
+      '    count: hits.length,' +
+      '    id: hits[0] ? hits[0].getAttribute("data-filing-id") : null,' +
+      '    villa: hits[0] ? hits[0].getAttribute("data-villa") : null' +
+      '  };' +
+      '})()'
+    );
+    check('the focused ROW is visually highlighted, and only that one',
+      focus.count === 1 && focus.id === String(FOCUS_FILING_ID) && focus.villa === 'Villa Anda',
+      focus);
+
+    // ...and the wiring is honest end to end: the autofill that armed is ANDA's, so once the
+    // fake portal's challenge clears, ANDA's credentials land with zero human interaction
+    // beyond the (simulated) captcha — the exact promise the booking tab's button makes.
+    // Re-park explicitly first (the did-attach park can lose a race against the live portal's
+    // redirects on a networked machine); dom-ready re-injects the poller, as scenario 4 proves.
+    await toFakePortal(wcFor('Villa Anda'));
+    await sleep(4500);
+    const f = await fields('Villa Anda');
+    out(`      portal : ${JSON.stringify(f)}`);
+    check('the boot-armed autofill really lands in the focused villa\'s page',
+      f && f.user === ANDA.login && f.pass === ANDA.pass, f);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════

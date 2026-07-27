@@ -61,6 +61,57 @@ npm install
 npm start          # standalone-окно с таблицей аккаунтов
 ```
 
+## Mock-портал: внутренний e2e всего механизма подачи (T3-07)
+
+`test/mock-portal/` — локальный МОК настоящего TM30-портала (login →
+Inform Accommodation → серверная валидация xlsx → receipt или поимённый
+список нарушений). Позволяет прогнать весь механизм подачи целиком, **не
+трогая настоящий иммиграционный сервис**. Валидация повторяет
+государственный контракт импорта (Iteration 2 D-2): один лист
+«แบบแจ้งที่พัก Inform Accom», 9 байт-точных заголовков, обязательные поля,
+Gender ∈ {M,F}, ICAO-национальность, даты `DD/MM/YYYY` (у даты рождения
+разрешены заглушки `00`).
+
+Хелпер целится в мок через env `TM30_PORTAL_BASE_URL`: main.js пробрасывает
+её в `app.html` query-параметром `portal`, и `TM30_URL` берёт её вместо
+`https://tm30.immigration.go.th`. **Без переменной поведение байт-в-байт
+прежнее** (существующие сьюты это доказывают).
+
+```bash
+cd desktop/tm30-helper
+
+# 1. мок-портал (по умолчанию порт 8630; логин — любая непустая пара,
+#    либо закрепите: MOCK_TM30_USER=... MOCK_TM30_PASS=...)
+node test/mock-portal/server.mjs --port 8630
+
+# 2. тестовые листы для ручной загрузки (валидный / заведомо битый)
+node test/mock-portal/build-sheet.mjs            # → Villa_Demo_..._TM30.xlsx (ждём receipt)
+node test/mock-portal/build-sheet.mjs --broken   # → broken_TM30.xlsx (ждём список нарушений)
+
+# 3. deep link с тестовым worklist'ом (печатает tm30://open?d=…)
+node test/autofill/fixture.js
+
+# 4. хелпер, нацеленный на мок (Linux: ELECTRON_DISABLE_SANDBOX=1)
+TM30_PORTAL_BASE_URL=http://localhost:8630 ELECTRON_DISABLE_SANDBOX=1 \
+  npx electron . "tm30://open?d=<из шага 3>"
+```
+
+Дальше руками: выбрать виллу → в webview мокового портала кликнуть
+«✓ I am human» (фейковый Turnstile: пустой `cf-turnstile-response`
+становится непустым) → **штатный автофилл сам подставит логин/пароль** —
+селекторы `#user`/`#pass` те же, что у реального портала → Sign in →
+страница Inform Accommodation → загрузить лист из шага 2. Валидный даёт
+receipt с номером `MOCK-TM30-…` и таблицей гостей; битый — постраничный
+список нарушений с номерами строк. `↻ fresh login` сбрасывает партицию
+виллы и возвращает на `/login` — у каждой виллы своя cookie-сессия,
+изоляция партиций видна вживую.
+
+Юнит/интеграционные тесты мока (node ≥ 21 понимает только glob, не каталог):
+
+```bash
+node --test 'test/mock-portal/*.test.mjs'
+```
+
 ## Сборка инсталляторов
 
 ```bash

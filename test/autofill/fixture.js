@@ -74,13 +74,33 @@ const worklist = [
   },
 ];
 
-const b64url = Buffer.from(JSON.stringify({ v: 2, worklist }), 'utf8')
-  .toString('base64')
-  .replace(/\+/g, '-')
-  .replace(/\//g, '_')
-  .replace(/=+$/, '');
+const encode = (payload) =>
+  Buffer.from(JSON.stringify(payload), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 
-module.exports = { worklist, b64url, SURIYAN, ANDA, link: `tm30://open?d=${b64url}` };
+const b64url = encode({ v: 2, worklist });
+
+/**
+ * T3-03: the SAME worklist with `focus_filing_id: 104` (Villa Anda — credentialled, so the
+ * focused boot must arm autofill exactly like a human click). Scenario 15 boots app.html with
+ * this; every other scenario keeps the focus-less payload, which doubles as the regression
+ * guard that a payload WITHOUT the field behaves exactly as before.
+ */
+const FOCUS_FILING_ID = 104;
+const b64urlFocus = encode({ v: 2, worklist, focus_filing_id: FOCUS_FILING_ID });
+
+module.exports = {
+  worklist,
+  b64url,
+  b64urlFocus,
+  FOCUS_FILING_ID,
+  SURIYAN,
+  ANDA,
+  link: `tm30://open?d=${b64url}`,
+};
 
 // `node fixture.js` prints a deep link you can hand to the real Helper by hand.
 if (require.main === module) process.stdout.write(`tm30://open?d=${b64url}\n`);

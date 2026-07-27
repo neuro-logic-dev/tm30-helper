@@ -71,7 +71,7 @@ function openStandaloneWindow() {
  * Механизм передачи данных прежний и намеренно нулевой по зависимостям: payload
  * уезжает в query как base64url — ни preload, ни IPC, ни сети (014 §2.5).
  */
-function openWorklistWindow(worklist) {
+function openWorklistWindow(worklist, focusFilingId) {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -81,7 +81,21 @@ function openWorklistWindow(worklist) {
     // (скачать лист / открыть папку). v1-окна остаются без preload — 013 §3.5.
     webPreferences: { webviewTag: true, preload: path.join(__dirname, 'preload.js') },
   });
-  win.loadFile('app.html', { query: { d: toBase64Url({ v: 2, worklist }) } });
+  // T3-03: focus_filing_id уезжает в НОВОЕ окно тем же query-механизмом. Каждая v2-ссылка
+  // открывает СВОЁ окно, так что фокус по построению существует только на initial boot —
+  // ни один уже открытый webview никогда не перенавигируется этим полем.
+  win.loadFile('app.html', {
+    query: {
+      d: toBase64Url({
+        v: 2,
+        worklist,
+        ...(Number.isFinite(focusFilingId) ? { focus_filing_id: focusFilingId } : {}),
+      }),
+      // T3-07: portal-base override for the internal MOCK-portal e2e (test/mock-portal/).
+      // Unset ⇒ the param is absent ⇒ app.html falls back to the real portal URL, byte-identical.
+      ...(process.env.TM30_PORTAL_BASE_URL ? { portal: process.env.TM30_PORTAL_BASE_URL } : {}),
+    },
+  });
   win.focus();
 }
 
@@ -117,9 +131,10 @@ function handleDeepLink(url) {
       const withCreds = result.worklist.filter((r) => r.account).length;
       console.log(
         `[tm30-helper] deep link v2: ${result.worklist.length} filing(s), ` +
-          `${withCreds} with credentials, ${result.worklist.length - withCreds} manual-login`
+          `${withCreds} with credentials, ${result.worklist.length - withCreds} manual-login` +
+          (result.focus_filing_id !== undefined ? `, focus filing #${result.focus_filing_id}` : '')
       );
-      openWorklistWindow(result.worklist);
+      openWorklistWindow(result.worklist, result.focus_filing_id);
       return;
     }
 

@@ -122,7 +122,7 @@ function normalizeRow(row, index) {
  *
  * @param {string} url
  * @returns {{kind:'v1',account:object}
- *          |{kind:'v2',worklist:object[]}
+ *          |{kind:'v2',worklist:object[],focus_filing_id?:number}
  *          |{kind:'chooser'}
  *          |{kind:'error',reason:string}
  *          |null} `null` ONLY when the URL is not a `tm30://` link at all (nothing to do);
@@ -165,7 +165,18 @@ function parseDeepLink(url) {
 
         // An EMPTY worklist is well-formed, not broken: nothing is due right now. The window
         // layer says so; it is not a reason to fall back to the chooser.
-        return { kind: DeepLinkKind.V2, worklist };
+        const result = { kind: DeepLinkKind.V2, worklist };
+
+        /**
+         * T3-03: the OPTIONAL focus — the filing the window boots pre-selected on. Tolerant
+         * BY DESIGN, unlike the row checks above: focus is an enhancement on top of a payload
+         * that is otherwise fully usable, so an absent or junk value degrades to "no focus"
+         * (the key stays OFF the result), never to the loud ERROR path.
+         */
+        if (Number.isFinite(payload.focus_filing_id)) {
+            result.focus_filing_id = payload.focus_filing_id;
+        }
+        return result;
     }
 
     // ── v1 legacy: `{ name, login, pass }`. UNCHANGED behaviour (013 §5 row 4). ──

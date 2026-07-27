@@ -159,6 +159,12 @@
         border-color: var(--accent);
         box-shadow: inset 0 0 0 1px var(--accent);
       }
+      /*
+        T3-03: the deep link's FOCUSED filing — the one the operator launched from. An outer
+        ring, distinct from `.sel`'s inset (selection is per-VILLA and moves with clicks; the
+        focus is per-ROW and never moves), so the two can overlap without erasing each other.
+      */
+      .row.focused { outline: 2px solid var(--accent); outline-offset: 1px; }
       .row.s-need { border-left-color: var(--due); }
       .row.s-dl { border-left-color: var(--accent); }
       .row.s-sub { border-left-color: var(--ok); }
@@ -492,8 +498,15 @@
        * the portal root lives here — and is stamped onto every pool webview as its `src`
        * ATTRIBUTE at creation, which is what actually navigates it (4c's ruling: `.src` from
        * script silently no-ops; the attribute, set before attach, is the mechanism).
+       *
+       * T3-07: the ONE override seam for the internal mock-portal e2e. This renderer has no
+       * process.env, so main.js forwards TM30_PORTAL_BASE_URL as `?portal=…` over the same
+       * zero-dep query mechanism the payload rides. No param (env unset, and every existing
+       * harness boot) ⇒ the real portal — behavior byte-identical.
        */
-      var TM30_URL = 'https://tm30.immigration.go.th';
+      var TM30_URL =
+        new URLSearchParams(location.search).get('portal') ||
+        'https://tm30.immigration.go.th';
 
       // ── payload ────────────────────────────────────────────────────────────────────────
       // Same zero-dep mechanism v1 uses: main.js base64url-encodes the ALREADY-PARSED payload
@@ -550,6 +563,15 @@
         buckets: null,
         /** Transient status-line note, e.g. `sheet downloaded ✓`. */
         statusNote: null,
+
+        // ── T3-03 addition ──────────────────────────────────────────────────────────────
+        /**
+         * The deep link's `focus_filing_id`, kept ONLY when that filing is actually in this
+         * payload's worklist (a stale id from the web renders nothing rather than lying).
+         * Read by `renderRow` for the highlight; the boot block at the bottom of the file
+         * does the one-time villa auto-select. Never changes after boot.
+         */
+        focusFilingId: null,
 
         // ── A-WEB-4e addition ───────────────────────────────────────────────────────────
         /**
@@ -907,6 +929,10 @@
 
         var box = document.createElement('div');
         box.className = 'row ' + art.row + (row.villa === state.activeVilla ? ' sel' : '');
+        // T3-03: the launched-from filing keeps its ring across every re-render.
+        if (state.focusFilingId !== null && row.filing_id === state.focusFilingId) {
+          box.classList.add('focused');
+        }
         box.setAttribute('data-villa', row.villa);
         box.setAttribute('data-filing-id', row.filing_id);
         box.setAttribute('role', 'button');
@@ -2041,6 +2067,32 @@
       var payload = readPayload();
       state.worklist = Array.isArray(payload.worklist) ? payload.worklist : [];
 
+      /**
+       * T3-03: resolve the optional focus BEFORE the first render, so the highlight is on the
+       * very first paint and a postponed focused row is not hidden inside the collapsed group.
+       * An id that is not in THIS payload's worklist is dropped with a log — stale focus must
+       * not highlight nothing or, worse, a wrong row.
+       */
+      var focusRow = null;
+      if (Number.isFinite(payload.focus_filing_id)) {
+        for (var fi = 0; fi < state.worklist.length; fi += 1) {
+          if (state.worklist[fi].filing_id === payload.focus_filing_id) {
+            focusRow = state.worklist[fi];
+            break;
+          }
+        }
+        if (focusRow) {
+          state.focusFilingId = payload.focus_filing_id;
+          if (!state.renderNow) state.renderNow = Date.now(); // the same captured instant renderList would take
+          if (isPostponed(focusRow)) state.postponedOpen = true;
+        } else {
+          console.warn(
+            '[tm30-helper] focus_filing_id ' + payload.focus_filing_id +
+              ' is not in this worklist — opening unfocused'
+          );
+        }
+      }
+
       renderList(); // computes the buckets…
       renderCount(); // …which this reads. Order matters.
       renderStatusLine();
@@ -2049,6 +2101,24 @@
       // active. See the note inside `mountPortal`.
       mountPortal();
       mountAutofill(); // 4e — subscribes to `onActiveVillaChange`; nothing fires until a click
+
+      /**
+       * T3-03: the one-time INITIAL-BOOT auto-select — deliberately the SAME call a human villa
+       * click makes, and nothing more: `setActiveVilla` → mountPortal's listener boots the
+       * villa's `persist:tm30-v-…` webview from the pool → mountAutofill's listener arms the
+       * credential autofill (or stays inert for a cred-less villa). It runs AFTER both mounts,
+       * exactly like a click would.
+       *
+       * This can never navigate or reset an already-open window: every v2 deep link opens a
+       * NEW window (main.js `openWorklistWindow`), so this code only ever runs against a
+       * freshly-booted, empty pool — the selection-must-not-navigate ruling holds untouched
+       * for everything after this line.
+       */
+      if (focusRow) {
+        setActiveVilla(focusRow.villa);
+        var focusedEl = el.list.querySelector('.row.focused');
+        if (focusedEl && focusedEl.scrollIntoView) focusedEl.scrollIntoView({ block: 'nearest' });
+      }
 
       console.log(
         '[tm30-helper] app.html: two-pane shell up — ' +

@@ -243,6 +243,56 @@ test('(d3) malformed rows and unknown versions are errors, not silent fallbacks'
     assert.equal(parseDeepLink(encode({ v: 2, worklist: [] })).kind, DeepLinkKind.V2);
 });
 
+// ───────────────── focus_filing_id (T3-03) — optional, backward compatible both ways ─────────────────
+
+test('focus: focus_filing_id survives emitter → parser next to an intact worklist', () => {
+    const url = buildTm30DeepLinkV2({
+        worklist: toTm30HelperWorklist([wireRowWithAccount, wireRowNoAccount], ORIGIN),
+        focus_filing_id: 4822,
+    });
+    const result = parseDeepLink(url);
+
+    assert.equal(result.kind, DeepLinkKind.V2);
+    assert.equal(result.focus_filing_id, 4822);
+    // The focus rides ALONGSIDE the worklist; it must not perturb the rows themselves.
+    assert.deepEqual(result.worklist.map((r) => r.filing_id), [4821, 4822]);
+});
+
+test('focus: an UNFOCUSED link carries no focus_filing_id key — emitted JSON and parse result', () => {
+    const url = buildTm30DeepLinkV2({
+        worklist: toTm30HelperWorklist([wireRowWithAccount], ORIGIN),
+    });
+    const json = Buffer.from(
+        url.split('d=')[1].replace(/-/g, '+').replace(/_/g, '/'),
+        'base64'
+    ).toString('utf8');
+
+    // The key must be ABSENT from the wire (not `null`-stubbed) so a focus-less link stays
+    // byte-identical to what pre-T3-03 emitters produced — old Helpers see nothing new.
+    assert.ok(!json.includes('focus_filing_id'), 'unfocused link must not carry the key');
+    const result = parseDeepLink(url);
+    assert.equal(result.kind, DeepLinkKind.V2);
+    assert.ok(!('focus_filing_id' in result), 'parse result must not fabricate a focus');
+});
+
+test('focus: a junk focus value degrades to "no focus", never to an error', () => {
+    const encode = (obj) =>
+        'tm30://open?d=' +
+        Buffer.from(JSON.stringify(obj), 'utf8')
+            .toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+
+    // The worklist is fully usable; the focus is an enhancement. A stale/garbled focus must
+    // not take the whole payload down with it (contrast the row checks, which stay LOUD).
+    for (const junk of ['4821', null, {}, NaN]) {
+        const result = parseDeepLink(encode({ v: 2, worklist: [], focus_filing_id: junk }));
+        assert.equal(result.kind, DeepLinkKind.V2, `junk focus ${String(junk)} must stay v2`);
+        assert.ok(!('focus_filing_id' in result), 'junk focus must be dropped, not forwarded');
+    }
+});
+
 // ───────────────────── NEGATIVE CONTROL — do these assertions have teeth? ─────────────────────
 
 test('NEGATIVE CONTROL: the OLD parser silently swallows the very payload the new one accepts', () => {

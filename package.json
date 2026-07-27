@@ -24,7 +24,9 @@
     "protocols": [
       {
         "name": "TM30 Helper Protocol",
-        "schemes": ["tm30"]
+        "schemes": [
+          "tm30"
+        ]
       }
     ],
     "mac": {
@@ -33,7 +35,9 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         }
       ]
     },
@@ -41,7 +45,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -53,6 +59,7 @@
   },
   "devDependencies": {
     "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "exceljs": "^4.4.0"
   }
 }
