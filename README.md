@@ -5,9 +5,10 @@
 после того, как оператор пройдёт капчу Cloudflare Turnstile**.
 
 **Скачать инсталляторы (для операторов):** страница `/tm30-helper` в приложении,
-либо публичный релиз-зеркало
-<https://github.com/Paroletatel/tm30-helper-releases/releases/latest>.
-Ссылки в приложении идут через `/api/tm30-helper/download?os=mac|win`.
+либо релизы этого репозитория
+<https://github.com/neuro-logic-dev/tm30-helper/releases/latest>.
+Страница качает файлы напрямую с `releases/latest/download/`, поэтому репозиторий
+должен быть публичным — у приватного эти ссылки отдают 404 без токена.
 
 Обычный iframe/веб-браузер тут не подходит: TM30 запрещает встраивание
 (`X-Frame-Options`), а обойти это можно только из полноценного Chromium —
