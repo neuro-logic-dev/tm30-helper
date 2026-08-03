@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>TM30</title>
@@ -110,9 +110,9 @@
 
 <div class="browser-chrome">
   <div class="nav-btns">
-    <button id="btn-back" title="Назад" disabled>‹</button>
-    <button id="btn-fwd" title="Вперёд" disabled>›</button>
-    <button id="btn-reload" title="Обновить" disabled>⟳</button>
+    <button id="btn-back" title="Back" disabled>‹</button>
+    <button id="btn-fwd" title="Forward" disabled>›</button>
+    <button id="btn-reload" title="Reload" disabled>⟳</button>
   </div>
   <div class="address-bar">
     <span>🔒</span>
@@ -120,7 +120,7 @@
   </div>
   <div class="account-badge">
     <span id="acc-name"></span>
-    <span class="st" id="acc-status">ждём капчу…</span>
+    <span class="st" id="acc-status">waiting for captcha…</span>
   </div>
 </div>
 
@@ -133,7 +133,7 @@
 <script>
   const TM30_URL = "https://tm30.immigration.go.th";
 
-  // аккаунт приходит из main-процесса через query: ?d=<base64url(JSON)>
+  // The account arrives from the main process via query: ?d=<base64url(JSON)>
   function readAccount() {
     const d = new URLSearchParams(location.search).get("d");
     if (!d) return null;
@@ -144,7 +144,7 @@
     } catch { return null; }
   }
 
-  const acc = readAccount() || { name: "без аккаунта", login: "", pass: "" };
+  const acc = readAccount() || { name: "no account", login: "", pass: "" };
 
   const frame       = document.getElementById("frame");
   const placeholder = document.getElementById("placeholder");
@@ -159,7 +159,7 @@
   document.title = acc.name + " — TM30";
   addressText.textContent = TM30_URL;
 
-  // ---------- Автозаполнение после прохождения Turnstile ----------
+  // ---------- Autofill once Turnstile is solved ----------
   function buildAutofillScript() {
     return `
       (function () {
@@ -201,7 +201,7 @@
     const watch = setInterval(() => {
       frame.executeJavaScript("window.__tm30Filled === true").then(filled => {
         if (filled) {
-          accStatus.textContent = "✓ подставлено";
+          accStatus.textContent = "✓ filled in";
           accStatus.classList.add("done");
           clearInterval(watch);
         }
@@ -209,7 +209,7 @@
     }, 600);
   });
 
-  // ---------- Навигация ----------
+  // ---------- Navigation ----------
   btnBack.addEventListener("click", () => frame.canGoBack() && frame.goBack());
   btnFwd.addEventListener("click", () => frame.canGoForward() && frame.goForward());
   btnReload.addEventListener("click", () => frame.reload());
@@ -234,8 +234,8 @@
     placeholder.classList.remove("hidden");
     placeholder.innerHTML = `
       <div class="icon">⚠️</div>
-      <div>Не удалось загрузить <b>${e.validatedURL || ""}</b></div>
-      <div style="font-size:12px">${e.errorDescription || "ошибка сети"}</div>`;
+      <div>Could not load <b>${e.validatedURL || ""}</b></div>
+      <div style="font-size:12px">${e.errorDescription || "network error"}</div>`;
   });
 
   frame.src = TM30_URL;
