@@ -2,6 +2,8 @@ const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electro
 const path = require('path');
 const fs = require('fs');
 
+const { autoUpdater } = require('electron-updater');
+
 const { parseDeepLink, DeepLinkKind, PROTOCOL } = require('./deeplink');
 const { registerInsertSheet } = require('./insert-sheet');
 
@@ -58,7 +60,9 @@ function openStandaloneWindow() {
     title: 'TM30 Helper',
     webPreferences: { webviewTag: true },
   });
-  win.loadFile('index.html');
+  // Версия уезжает в query, а не вшита в разметку: с автообновлением приложение
+  // меняет версию само, и жёстко прописанная строка на экране начинает врать.
+  win.loadFile('index.html', { query: { v: app.getVersion() } });
 }
 
 /**
@@ -269,6 +273,53 @@ ipcMain.handle('tm30:open-external', async (_event, rawUrl) => {
   }
 });
 
+// ---------- Автообновление ----------
+/**
+ * Помощник обновляет себя сам, молча. Ничего не спрашиваем и ничего не показываем:
+ * человек открывает его, чтобы подать TM30, а не чтобы обслуживать приложение.
+ *
+ * Как это ложится на жизненный цикл: на Windows приложение выходит, как только
+ * закрыто последнее окно (см. `window-all-closed` ниже), то есть живёт от одной
+ * задачи до другой. Проверка на старте + установка при выходе означают, что
+ * обновление приезжает буквально к следующему открытию — окна для «забыл
+ * обновиться» почти не остаётся. На macOS процесс живёт дольше, поэтому там
+ * дополнительно работает периодическая проверка.
+ *
+ * 🔴 Обязательные условия, без которых механизм молча мёртв:
+ *   • релиз собран с `--publish always`, чтобы рядом с артефактами лежали
+ *     `latest.yml` / `latest-mac.yml` — апдейтер читает их, а не список файлов;
+ *   • имена артефактов стабильные (`artifactName` в package.json): переименование
+ *     файла руками расходится с именем внутри latest.yml и даёт 404;
+ *   • macOS обновляется ТОЛЬКО из подписанного и нотаризованного билда — это
+ *     требование Squirrel.Mac, а не настройка. Неподписанная сборка ставится
+ *     руками и обновляться не будет.
+ */
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+function initAutoUpdate() {
+  // Запуск через `electron .` не имеет фида обновлений — апдейтер там только шумит.
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('[tm30-helper] update available:', info && info.version);
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('[tm30-helper] update downloaded, installs on quit:', info && info.version);
+  });
+  // Сеть недоступна, релиз ещё не опубликован, GitHub прилёг — это не повод мешать
+  // человеку работать. Ошибка идёт в лог, приложение продолжает как ни в чём не бывало.
+  autoUpdater.on('error', (err) => {
+    console.error('[tm30-helper] update check failed:', (err && err.message) || err);
+  });
+
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  check();
+  setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+}
+
 // deep link может прилететь до app.whenReady()
 let pendingLink = null;
 
@@ -286,6 +337,8 @@ app.on('second-instance', (_event, argv) => {
 });
 
 app.whenReady().then(() => {
+  initAutoUpdate();
+
   const url = pendingLink || findDeepLinkInArgv(process.argv);
   if (url) {
     handleDeepLink(url);
