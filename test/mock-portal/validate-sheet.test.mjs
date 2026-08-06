@@ -15,7 +15,9 @@ import assert from 'node:assert/strict';
 import { validateSheetBuffer, SHEET_NAME, HEADER_ROW } from './validate-sheet.mjs';
 import { buildSheetBuffer, GOLDEN_ROWS } from './build-sheet.mjs';
 
-const messages = (v) => v.violations.map((x) => x.message).join('\n');
+// Tolerant of a PASSING verdict (no `violations` key) so it can be used as an assert message
+// on both branches without blowing up before the assertion runs.
+const messages = (v) => (v.violations ?? []).map((x) => x.message).join('\n');
 
 test('accepts the golden buffer (incl. 00-placeholder birth dates) and parses every guest', async () => {
     const verdict = await validateSheetBuffer(await buildSheetBuffer());
@@ -92,14 +94,46 @@ test('rejects a bad gender with the row number and the offending value', async (
     assert.match(messages(verdict), /row 3: Gender must be "M" or "F", got "X"/);
 });
 
-test('rejects a bad nationality (not 3 A-Z letters) with the row number', async () => {
+test('rejects a nationality outside the template vocabulary, with the row number', async () => {
     const rows = GOLDEN_ROWS.map((r) => [...r]);
-    rows[0][5] = 'PL'; // xlsx row 2
-    rows[2][5] = 'usa'; // xlsx row 4 — lowercase is NOT ICAO
+    rows[0][5] = 'PL'; // xlsx row 2 — too short
+    rows[2][5] = 'usa'; // xlsx row 4 — lowercase; the vocabulary is upper case
     const verdict = await validateSheetBuffer(await buildSheetBuffer({ rows }));
     assert.equal(verdict.ok, false);
-    assert.match(messages(verdict), /row 2: Nationality must be a 3-letter ICAO code \(A–Z\), got "PL"/);
+    assert.match(messages(verdict), /row 2: Nationality must be one of the 267 codes .* got "PL"/);
     assert.match(messages(verdict), /row 4: Nationality .* got "usa"/);
+});
+
+test('rejects a well-SHAPED code the template does not list — the old rule let these through', async () => {
+    // `/^[A-Z]{3}$/` accepted every one of these. `ZZZ` is nobody; `D` is what every German
+    // passport prints and TM30 has no entry for it; `JEY` is a real passport, also absent.
+    const rows = GOLDEN_ROWS.map((r) => [...r]);
+    rows[0][5] = 'ZZZ';
+    rows[1][5] = 'JEY';
+    const verdict = await validateSheetBuffer(await buildSheetBuffer({ rows }));
+    assert.equal(verdict.ok, false);
+    assert.match(messages(verdict), /row 2: Nationality .* got "ZZZ"/);
+    assert.match(messages(verdict), /row 3: Nationality .* got "JEY"/);
+});
+
+test('rejects a COUNTRY NAME — what the product itself used to write into this column', async () => {
+    // Until MO-TM30-NAT the backend resolved the MRZ code to a display label and copied it in
+    // verbatim, so this testbed would have passed a file the portal cannot read at all.
+    const rows = GOLDEN_ROWS.map((r) => [...r]);
+    rows[0][5] = 'Russia';
+    const verdict = await validateSheetBuffer(await buildSheetBuffer({ rows }));
+    assert.equal(verdict.ok, false);
+    assert.match(messages(verdict), /row 2: Nationality .* got "Russia"/);
+});
+
+test('ACCEPTS the twelve template codes that contain digits — the old rule rejected them', async () => {
+    // `B13`, `E01`, `Y03` … are in the government file. A letters-only rule called them invalid.
+    const rows = GOLDEN_ROWS.map((r) => [...r]);
+    rows[0][5] = 'E01';
+    rows[1][5] = 'Y03';
+    rows[2][5] = 'B13';
+    const verdict = await validateSheetBuffer(await buildSheetBuffer({ rows }));
+    assert.equal(verdict.ok, true, messages(verdict));
 });
 
 test('rejects bad date formats with the row number; 00-placeholders stay birth-date-only', async () => {

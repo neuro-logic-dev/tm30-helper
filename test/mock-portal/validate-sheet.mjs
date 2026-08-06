@@ -13,14 +13,34 @@
  *     space after `(ค.ศ. / A.D.) ` included)
  *   · ≥1 data row (rows 2+; fully blank rows are ignored)
  *   · per row: First/Last Name, Gender, Passport, Nationality non-empty; Gender ∈ {M,F};
- *     Nationality = 3 A-Z letters (ICAO); Birth Date + Check-out Date TEXT `DD/MM/YYYY` (A.D.)
- *     — Birth Date may use `00` day/month placeholders, Check-out Date may not.
+ *     Nationality ∈ the template's own 267-code vocabulary; Birth Date + Check-out Date TEXT
+ *     `DD/MM/YYYY` (A.D.) — Birth Date may use `00` day/month placeholders, Check-out Date may not.
+ *
+ * 🔴 The nationality rule used to be `/^[A-Z]{3}$/` — "a 3-letter ICAO code". Both halves of
+ * that were wrong (MO-TM30-NAT). It accepted `ZZZ` and `P0L`-shaped garbage the portal
+ * rejects, AND it rejected twelve codes the government file really lists (`B13`, `E01`,
+ * `Y03`… — they contain digits). Meanwhile the BE was writing country NAMES into that column,
+ * so this testbed's own rule would have failed the real product's real output. Membership in
+ * the vendored vocabulary is the only check that matches the portal.
  *
  * This is the MISTAKE-PREVENTION testbed: a rejection must name EVERY violation with its xlsx
  * row number, never a bare "invalid file".
  */
 
+import { createRequire } from 'node:module';
+
 import ExcelJS from 'exceljs';
+
+const require = createRequire(import.meta.url);
+/**
+ * The accepted nationality vocabulary — GENERATED in villas-be-core from the government
+ * template and vendored here (ADR-0007). `checksum` is the same value every other copy of this
+ * table carries in every repo; `tm30-nationalities.test.mjs` pins this copy to it.
+ */
+const VOCABULARY = require('./tm30-nationalities.json');
+
+export const TM30_NATIONALITY_CHECKSUM = VOCABULARY.checksum;
+export const TM30_NATIONALITY_CODES = new Set(VOCABULARY.nationalities.map((n) => n.code));
 
 /** The template's single worksheet name — byte-exact. */
 export const SHEET_NAME = 'แบบแจ้งที่พัก Inform Accom';
@@ -174,8 +194,13 @@ export async function validateSheetBuffer(buffer) {
         if (gender !== '' && gender !== 'M' && gender !== 'F') {
             violations.push({ row: r, message: `row ${r}: Gender must be "M" or "F", got "${gender}"` });
         }
-        if (nationality !== '' && !/^[A-Z]{3}$/.test(nationality)) {
-            violations.push({ row: r, message: `row ${r}: Nationality must be a 3-letter ICAO code (A–Z), got "${nationality}"` });
+        if (nationality !== '' && !TM30_NATIONALITY_CODES.has(nationality)) {
+            violations.push({
+                row: r,
+                message:
+                    `row ${r}: Nationality must be one of the ${TM30_NATIONALITY_CODES.size} codes on the ` +
+                    `template's สัญชาติ Nationality worksheet, got "${nationality}"`
+            });
         }
         if (birthDate !== '') {
             const err = dateError(birthDate, { allowZeroPlaceholders: true });
