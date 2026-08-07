@@ -80,6 +80,23 @@ setTimeout(() => {
   app.exit(1);
 }, HARNESS_TIMEOUT_MS).unref();
 
+/*
+  🔴 A rejected promise is a FAILED RUN, not a warning.
+
+  Every scenario below runs inside an async callback, and Electron's default for an unhandled
+  rejection is to print a warning and carry on. So a throw in the middle of the suite — a moved
+  file, a selector that stopped matching — stopped the assertions without failing anything, and
+  the run ended on the timeout above with `passed`/`failed` still at whatever it had reached.
+  Observed for real: the hand-back harness could not find the web app's source, asserted nothing,
+  and exited 0. Exit loudly instead.
+*/
+process.on('unhandledRejection', (err) => {
+  out('');
+  out('\u2717 the harness crashed \u2014 unhandled rejection, so the run is INVALID, not green:');
+  out('   ' + ((err && err.stack) || err));
+  app.exit(1);
+});
+
 async function waitFor(fn, opts = {}) {
   const { timeout = 20_000, every = 150, label = 'condition' } = opts;
   const t0 = Date.now();

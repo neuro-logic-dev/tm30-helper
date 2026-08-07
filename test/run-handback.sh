@@ -19,7 +19,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPER="$(cd "$HERE/.." && pwd)"
-WEB_ROOT="$(cd "$HELPER/../.." && pwd)"
+# Resolved, not counted upward — see the box in web-root.js.
+WEB_ROOT="$(node "$HERE/web-root.js")"
 BUILD_DIR="$HERE/.build"
 
 TSC="$WEB_ROOT/node_modules/.bin/tsc"

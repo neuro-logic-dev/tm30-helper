@@ -15,7 +15,9 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WEB_ROOT="$(cd "$HERE/../../.." && pwd)"
+# Resolved, not counted upward: this repo is checked out both nested inside mo-reservation-fe
+# and standalone beside it. See the box in web-root.js.
+WEB_ROOT="$(node "$HERE/web-root.js")"
 BUILD_DIR="$HERE/.build"
 
 TSC="$WEB_ROOT/node_modules/.bin/tsc"
