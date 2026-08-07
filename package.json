@@ -3,6 +3,7 @@
   "version": "2.0.1",
   "description": "TM30 Helper — открывает tm30.immigration.go.th с автозаполнением аккаунта по ссылке tm30://",
   "main": "main.js",
+  "author": "MO Estate",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --mac --win",
@@ -13,6 +14,7 @@
     "appId": "com.moestate.tm30helper",
     "productName": "TM30 Helper",
     "publish": null,
+    "artifactName": "TM30-Helper.${ext}",
     "files": [
       "main.js",
       "preload.js",

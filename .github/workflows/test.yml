@@ -1,0 +1,86 @@
+#
+# The gate. Reusable (`workflow_call`) so the exact same checks run on every push AND as the
+# pre-flight of a release — there is deliberately no second, weaker definition of "green".
+#
+# WHAT RUNS HERE, and why only this:
+#   • test/mock-portal/*.test.mjs — the mock portal's own unit tests (xlsx validation + server).
+#   • test/run-insert.sh   — T3-08/T3-11 ⇥ insert + auto-insert, driving the REAL app.html /
+#     preload.js / insert-sheet.js in a REAL Electron window against the local mock portal.
+#   • test/run-autofill.sh — 4e autofill wiring + timing, same shape.
+#
+# WHAT CANNOT RUN HERE, and it is not an oversight:
+#   • test/run.sh (emitter↔parser seam) and test/run-handback.sh both COMPILE web sources
+#     (`src/lib/tm30.ts`, `src/lib/reservation-url.ts`) out of mo-reservation-fe, which is a
+#     PRIVATE repository. Reaching it from here needs a long-lived cross-repo PAT. Those two
+#     stay a manual pre-release step (see README "Release"). The drift they guard against is a
+#     WEB-side change anyway, so their natural home is the web repo's CI, which can check this
+#     public repo out with no secret at all.
+#
+# The Electron harnesses need a display; Xvfb provides one. They also need the Chromium sandbox
+# off — an unprivileged CI container cannot set up user namespaces the way a desktop can.
+#
+name: test
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    # Pinned, not `ubuntu-latest`: the Electron runtime libs below carry Noble's `t64` ABI
+    # suffixes, which do not exist on 22.04. A floating label would silently break the install.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22, not the 20 on the dev machine: `node --test` only understands GLOB patterns
+          # from 21 on, and the mock-portal suite is addressed as `test/mock-portal/*.test.mjs`.
+          node-version: 22
+          cache: npm
+
+      # Electron ships its own Chromium; the runner image supplies neither its GTK/NSS runtime
+      # nor a display. Installed explicitly rather than trusted to the image's preinstall list.
+      - name: Install the Electron runtime libraries + Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            libnss3 \
+            libatk1.0-0t64 \
+            libatk-bridge2.0-0t64 \
+            libcups2t64 \
+            libdrm2 \
+            libgbm1 \
+            libgtk-3-0t64 \
+            libasound2t64 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxfixes3 \
+            libxrandr2
+
+      # The Electron binary is ~100 MB and is re-fetched by `npm ci` on every cold run.
+      - name: Cache the Electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npm ci
+
+      - name: Mock-portal unit tests
+        run: node --test 'test/mock-portal/*.test.mjs'
+
+      # `xvfb-run -a` picks a free display number instead of colliding on :99.
+      - name: T3-08/T3-11 insert harness (real app.html + insert-sheet.js + mock portal)
+        env:
+          ELECTRON_DISABLE_SANDBOX: 1
+        run: xvfb-run -a ./test/run-insert.sh --no-sandbox
+
+      - name: 4e autofill harness
+        env:
+          ELECTRON_DISABLE_SANDBOX: 1
+        run: xvfb-run -a ./test/run-autofill.sh --no-sandbox

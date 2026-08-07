@@ -205,27 +205,64 @@ check the preview and press Save`. Клик закрывает, авто-скр�
 неоднозначность → подсказка + рабочий ручной ⇥, one-shot + ре-арминг перезагрузкой,
 громкий провал без баннера и без авто-ретрая.
 
-## Сборка инсталляторов
+## Релиз
+
+**Релиз целиком делает CI. Локально не собирается ничего** — в том числе
+Windows-инсталлятор, для которого на mac-машине нет тулчейна (`npm run dist:win`
+без wine + nsis не работает; именно поэтому в `v2.0.1` пришлось перенести `.exe`
+из `v2.0.0` байт-в-байт).
 
 ```bash
-npm run dist:mac   # dist/TM30 Helper-<ver>-universal.dmg   (Intel + Apple Silicon)
-npm run dist:win   # dist/TM30 Helper Setup <ver>.exe        (Windows x64, one-click)
-npm run dist       # оба сразу
+gh workflow run release.yml -f bump=patch          # или через Actions → release → Run workflow
+gh workflow run release.yml -f version=2.1.0       # точная версия
+gh workflow run release.yml -f dry_run=true        # прогон без коммита, тега и релиза
 ```
 
-`npm run dist:win` **не собирается на macOS** без wine + nsis-тулчейна — Windows-
-инсталлятор собирается на Windows-машине или в CI. `dist:mac` на mac-машине
-собирается как есть.
+`.github/workflows/release.yml` — `plan` → `gate` → `build` → `publish`:
+
+| Шаг | Где | Что делает |
+|-----|-----|-----------|
+| `plan` | ubuntu | Считает следующую версию (**ничего не пишет**) и падает, если такой тег уже есть |
+| `gate` | ubuntu | `test.yml` — юниты мок-портала + insert- и autofill-харнессы под Xvfb |
+| `build` | macos + windows | `.dmg` (universal) и `.exe`; каждый артефакт **проверяется на месте** — версия внутри бандла, `tm30://` в `CFBundleURLSchemes`, `lipo -archs` |
+| `publish` | ubuntu | Коммитит бамп в `main`, ставит тег, создаёт релиз **сразу с обоими** файлами, затем проверяет, что обе ссылки `releases/latest/download/` отдают ровно те байты |
+
+Версия сначала только вычисляется и **вшивается в инсталляторы**, а в репозиторий
+попадает лишь на шаге `publish` — упавший тест не оставляет ни висячего бампа
+версии, ни тега без релиза. Релиз создаётся один раз с обоими артефактами, потому
+что релиз с половиной ассетов — это живой 404 для того, кто в этот момент нажал
+«Скачать».
+
+Имена артефактов фиксированные: страница `/tm30-helper` качает
+`releases/latest/download/TM30-Helper.dmg` / `.exe`, поэтому
+`build.artifactName` в `package.json` = `TM30-Helper.${ext}` — билдер сразу
+кладёт файлы под нужными именами, и ручное переименование при выкладке
+(источник 404-ов) исчезает как шаг. Версия живёт в теге релиза и внутри
+приложения, а не в имени файла.
+
+**Перед релизом — руками**, эти два прогона в CI хелпера невозможны (оба
+компилируют исходники приватного `mo-reservation-fe`, см. комментарий в
+`test.yml`):
+
+```bash
+WEB=../mo-reservation-fe
+$WEB/node_modules/.bin/tsc $WEB/src/lib/tm30.ts --outDir test/.build \
+  --module commonjs --target es2022 --moduleResolution node --strict --skipLibCheck
+node --test test/roundtrip.test.mjs      # seam-тест эмиттер↔парсер
+./test/run-handback.sh                   # правит WEB_ROOT под свой layout
+```
+
+Локальная сборка (для отладки, не для выкладки):
+
+```bash
+npm run dist:mac   # dist/TM30-Helper.dmg  (Intel + Apple Silicon)
+npm run dist:win   # dist/TM30-Helper.exe  (Windows x64; на macOS не соберётся)
+```
 
 Протокол `tm30://` регистрируется в ОС при установке — оператору настраивать
 ничего не нужно. Проверено на собранном `2.0.0`: установленное из `.dmg`
 приложение поднимается по `tm30://`-ссылке «с нуля» и открывает `app.html` для
 v2-ссылки и `window.html` для v1-ссылки.
-
-**Публикация:** страница `/tm30-helper` качает файлы с фиксированными именами
-`TM30-Helper.dmg` / `TM30-Helper.exe` из `releases/latest` зеркала — при
-выкладке артефакт нужно переименовать под это имя, иначе кнопка скачивания
-ведёт в 404.
 
 ## ⚠️ Подпись кода
 
