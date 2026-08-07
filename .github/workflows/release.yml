@@ -113,14 +113,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macOS ships the installer ONLY — no `latest-mac.yml`, deliberately. Squirrel.Mac
+          # refuses to apply an update to a build that is not Developer-ID-signed AND notarised
+          # (Apple's rule, not a setting), and this repo has no such certificate. Publishing a
+          # mac feed we cannot honour would make every Helper on macOS download an update it
+          # then fails to install, forever. No feed = the check 404s, main.js logs it and moves
+          # on, and the operator reinstalls by hand — see RELEASING.md.
           - os: macos-latest
             script: dist:mac
-            artifact: TM30-Helper.dmg
             name: installer-mac
+            paths: dist/TM30-Helper.dmg
+          # Windows carries the update feed: `electron-updater` updates unsigned NSIS builds
+          # happily, so `latest.yml` + the blockmap ride along with the installer.
           - os: windows-latest
             script: dist:win
-            artifact: TM30-Helper.exe
             name: installer-win
+            paths: |
+              dist/TM30-Helper.exe
+              dist/TM30-Helper.exe.blockmap
+              dist/latest.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -183,9 +194,18 @@ jobs:
           hdiutil detach /tmp/dmg -quiet
           echo "✓ dmg: $VERSION, universal ($ARCHS), tm30:// registered"
 
+          # The mac feed must NOT reach the release — see the matrix comment. The build can still
+          # emit one (a `publish` block is configured for Windows' sake), so it is caught here
+          # rather than trusted not to appear.
+          if [ -f "dist/latest-mac.yml" ]; then
+            echo "⚠︎ latest-mac.yml was generated; it is deliberately NOT published"
+          fi
+
       - name: Verify the Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $exe = "dist/TM30-Helper.exe"
           if (-not (Test-Path $exe)) { throw "$exe was not produced" }
@@ -194,10 +214,25 @@ jobs:
           if ($size -lt 40MB) { throw "$exe is only $size bytes" }
           Write-Host "OK exe: $size bytes, ProductVersion $((Get-Item $exe).VersionInfo.ProductVersion)"
 
+          # THE update feed. electron-updater reads latest.yml and nothing else: if it names a
+          # file or a version that does not match what ships, every Helper checks, finds nothing
+          # it can use, and stays on its old version forever — with no error an operator would
+          # ever see. That silence is why this is asserted instead of assumed (RELEASING.md).
+          $feed = "dist/latest.yml"
+          if (-not (Test-Path $feed)) { throw "$feed was not generated — auto-update would be dead on arrival" }
+          $text = Get-Content $feed -Raw
+          if ($text -notmatch '(?m)^version:\s*' + [regex]::Escape($env:VERSION) + '\s*$') {
+            throw "latest.yml does not name version $env:VERSION`n$text"
+          }
+          if ($text -notmatch '(?m)^path:\s*TM30-Helper\.exe\s*$') {
+            throw "latest.yml does not point at TM30-Helper.exe`n$text"
+          }
+          Write-Host "OK latest.yml: version $env:VERSION -> TM30-Helper.exe"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: dist/${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
           if-no-files-found: error
           # Long enough to grab by hand from a dry run; short enough not to hoard 260 MB a run.
           retention-days: 14
@@ -238,21 +273,30 @@ jobs:
           pattern: installer-*
           merge-multiple: true
 
-      - name: Publish the release with BOTH installers
+      - name: Publish the release with both installers and the Windows update feed
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
           set -euo pipefail
-          ls -l dist/TM30-Helper.dmg dist/TM30-Helper.exe
+          ls -l dist/TM30-Helper.dmg dist/TM30-Helper.exe dist/TM30-Helper.exe.blockmap dist/latest.yml
 
           cat > /tmp/notes.md <<'EOF'
-          Built end to end by CI: macOS and Windows installers come from the same commit and the
-          same version, and both were attached before the release went live.
+          Built end to end by CI: both installers come from the same commit and the same version,
+          and everything below was attached before the release went live.
 
           ## Downloads
           - **macOS** — `TM30-Helper.dmg` (universal, Intel + Apple Silicon)
           - **Windows** — `TM30-Helper.exe` (x64, one-click)
+
+          ## Updating
+          **Windows updates itself.** The Helper checks this release feed on start, downloads in
+          the background and installs on quit — no prompt, nothing to click.
+
+          **macOS does not, and installs by hand.** Squirrel.Mac only applies an update to a build
+          signed with an Apple Developer ID and notarised; this project has no such certificate
+          yet, so no mac update feed is published rather than one that would fail on every
+          attempt. Download the `.dmg` and install over the old app.
 
           ## Install / reinstall
           Install over the previous version — no uninstall needed. The `tm30://` handler
@@ -264,20 +308,26 @@ jobs:
           ---
           EOF
 
+          # latest.yml and the blockmap are ASSETS OF THIS RELEASE — that is where
+          # electron-updater looks for them. Attaching them anywhere else updates nobody.
           gh release create "$TAG" \
             dist/TM30-Helper.dmg \
             dist/TM30-Helper.exe \
+            dist/TM30-Helper.exe.blockmap \
+            dist/latest.yml \
             --title "TM30 Helper $TAG" \
             --notes-file /tmp/notes.md \
             --generate-notes
 
-      # The download page hardcodes these two URLs. Asserting them here means a broken release
-      # is caught by CI, not by an operator who cannot install.
-      - name: Verify the download page's links resolve
+      # Two audiences, one check. The download page hardcodes the installer URLs; every
+      # already-installed Windows Helper hardcodes `latest.yml` at the same base. Asserting them
+      # here means a broken release is caught by CI, not by an operator who cannot install or by
+      # a fleet that quietly stops updating.
+      - name: Verify the download page's links and the update feed resolve
         run: |
           set -euo pipefail
           BASE="https://github.com/${{ github.repository }}/releases/latest/download"
-          for f in TM30-Helper.dmg TM30-Helper.exe; do
+          for f in TM30-Helper.dmg TM30-Helper.exe latest.yml; do
             REMOTE="$(curl -sL -r 0-0 -D - -o /dev/null "$BASE/$f" | tr -d '\r' \
                       | sed -n 's#^[Cc]ontent-[Rr]ange: bytes 0-0/##p' | tail -1)"
             LOCAL="$(stat -c%s "dist/$f")"
@@ -285,3 +335,6 @@ jobs:
               || { echo "::error::$BASE/$f serves '$REMOTE' bytes, expected $LOCAL"; exit 1; }
             echo "✓ $f — latest/download serves $REMOTE bytes"
           done
+
+          # And the feed an installed Helper will actually parse, read back off the live release.
+          curl -sL "$BASE/latest.yml"

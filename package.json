@@ -39,22 +39,15 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "identity": null,
       "target": [
         {
           "target": "dmg",
           "arch": [
             "universal"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "universal"
-          ]
         }
-      ],
-      "hardenedRuntime": true,
-      "notarize": true
+      ]
     },
     "win": {
       "target": [

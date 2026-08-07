@@ -1,81 +1,78 @@
 # Releasing TM30 Helper
 
-The Helper updates itself. That only works if a release is cut the way this file
-describes — the update feed is a pair of generated files, not the list of assets on the
-release page, and three things silently kill it.
+**CI cuts the release. Nothing is built on anyone's laptop.**
+
+```bash
+gh workflow run release.yml -f version=2.2.0    # or -f bump=patch|minor|major
+gh workflow run release.yml -f dry_run=true     # build + test, no commit, no tag, no release
+```
+
+Actions → release → Run workflow does the same. `.github/workflows/release.yml` then runs
+`plan → gate → build (macOS ∥ Windows) → publish`: it settles the version, runs the suites,
+builds both installers, commits the bump, tags it, and creates ONE release with everything
+attached. `README.md` describes the job graph; this file is about what a release must
+CONTAIN, and how it silently fails to.
 
 ## The three ways to break auto-update
 
-1. **Publishing without `--publish always`.** `latest.yml` / `latest-mac.yml` are what
-   `electron-updater` reads. Without them the app checks, finds nothing, and stays on the
-   old version forever — no error the operator would ever see.
+1. **Publishing without the feed.** `latest.yml` is what `electron-updater` reads — not the
+   asset list on the release page. Without it the app checks, finds nothing, and stays on the
+   old version forever, with no error the operator would ever see. The `publish` job attaches
+   it as a release asset and then reads it back off the live release.
 2. **Renaming an asset.** `latest.yml` records the exact filename and its sha512.
-   `artifactName` in `package.json` already produces the stable `TM30-Helper.{exe,dmg,zip}`
-   the install page links to; rename anything by hand and the updater 404s.
-3. **Shipping an unsigned macOS build.** Squirrel.Mac refuses unsigned updates — that is
-   the platform's rule, not a setting. An unsigned build installs fine and then never
-   updates again.
+   `artifactName` in `package.json` produces the stable `TM30-Helper.{exe,dmg}` the install
+   page links to; rename anything by hand and the updater 404s. The Windows job asserts that
+   the feed names `TM30-Helper.exe` and the version being released.
+3. **Shipping an unsigned macOS build.** Squirrel.Mac refuses unsigned updates — the
+   platform's rule, not a setting. An unsigned build installs fine and then never updates.
 
-## Before you build
-
-Bump `version` in `package.json` and commit it. The version in the release must match the
-version in the app, and the screen reads it from `app.getVersion()`.
-
-## Windows
-
-Build on Windows. No signing certificate is needed — `electron-updater` updates unsigned
-NSIS builds, and the install page's PowerShell one-liner never sets Mark-of-the-Web, so
-SmartScreen stays quiet.
-
-```powershell
-$env:GH_TOKEN = "<a token with repo scope>"
-npm ci
-npx electron-builder --win --publish always
-```
-
-Produces and uploads `TM30-Helper.exe` + `latest.yml`.
-
-## macOS
-
-Build on macOS. Signing and notarisation are **required** — see breakage #3.
-
-```fish
-# Developer ID Application certificate, in the keychain or as a .p12
-set -x CSC_LINK /path/to/developer-id.p12
-set -x CSC_KEY_PASSWORD <p12 password>
-
-# Notarisation (an app-specific password, not the Apple ID password)
-set -x APPLE_ID <apple id>
-set -x APPLE_APP_SPECIFIC_PASSWORD <app-specific password>
-set -x APPLE_TEAM_ID <team id>
-
-set -x GH_TOKEN <a token with repo scope>
-
-npm ci
-npx electron-builder --mac --publish always
-```
-
-Produces and uploads `TM30-Helper.dmg` (first install), `TM30-Helper.zip` (what the
-updater downloads — Squirrel.Mac cannot update from a dmg) and `latest-mac.yml`.
-
-## What a correct release contains
+## What a release contains today, and why it is asymmetric
 
 ```
-TM30-Helper.exe      latest.yml
-TM30-Helper.dmg      TM30-Helper.zip      latest-mac.yml
+Windows   TM30-Helper.exe   TM30-Helper.exe.blockmap   latest.yml     ← updates itself
+macOS     TM30-Helper.dmg                                            ← installed by hand
 ```
 
-Both platforms have to be built and published under the **same release tag**, or one of
-them gets an update feed pointing at a version whose artifact is missing.
+Windows needs no certificate: `electron-updater` updates unsigned NSIS builds, and the
+install page's PowerShell one-liner never sets Mark-of-the-Web, so SmartScreen stays quiet.
 
-## Verifying
+macOS needs an **Apple Developer ID Application certificate and notarisation** before it can
+update itself — see breakage #3. This project does not have one (2026-08-07: the only
+identity on the build machine is an *Apple Development* certificate, which `spctl` rejects,
+and the repository has no signing secrets). So **no `latest-mac.yml` is published at all**.
+That is the deliberate choice: a mac feed we cannot honour would make every Helper on macOS
+download an update it then fails to install, on every check, forever. With no feed the check
+404s, `main.js` logs it and moves on, and mac operators reinstall from the download page.
 
-Install the previous version, publish the new one, then launch the old app: within a few
-seconds the console logs `update available`, then `update downloaded, installs on quit`.
-Quit it and reopen — it is the new version. The check also repeats every 4 hours for
-macOS, where the process outlives the window.
+## Turning macOS auto-update on, when the certificate exists
 
-## The one release that has to be installed by hand
+1. Apple Developer Program membership → **Developer ID Application** certificate, exported
+   as `.p12`.
+2. Repository secrets: `CSC_LINK` (base64 of the .p12), `CSC_KEY_PASSWORD`, `APPLE_ID`,
+   `APPLE_APP_SPECIFIC_PASSWORD` (an app-specific password, not the Apple ID password),
+   `APPLE_TEAM_ID`.
+3. `package.json` → `build.mac`: drop `"identity": null`, add `"hardenedRuntime": true` and
+   `"notarize": true`, and add the `zip` target back — Squirrel.Mac updates from a zip, never
+   from a dmg. The dmg stays for first install.
+4. `.github/workflows/release.yml` → the matrix entry for macOS: add
+   `dist/TM30-Helper.zip` and `dist/latest-mac.yml` to `paths`, add both to the
+   `gh release create` asset list and to the final link check.
+5. Assert the result rather than trusting it — `spctl -a -vv` on the built `.app` must say
+   **accepted**, and `xcrun stapler validate` must find a ticket. Without those two, the build
+   is the silent-death case #3 and must fail the job, not ship.
 
-2.1.0 is the first version that can update itself. Everyone on 2.0.0 has to run the
-install command from `/tm30-helper` once; from then on it is automatic.
+## Before you press the button
+
+Bump nothing by hand — `plan` does it and `publish` commits it. Do run the two suites CI
+cannot (both compile sources out of the private `mo-reservation-fe`):
+
+```bash
+./test/run.sh            # emitter ↔ parser seam
+./test/run-handback.sh   # the hand-back round trip
+```
+
+## Verifying an update actually lands
+
+Install the previous version on Windows, publish the new one, then launch the old app: within
+a few seconds the console logs `update available`, then `update downloaded, installs on quit`.
+Quit and reopen — it is the new version.
