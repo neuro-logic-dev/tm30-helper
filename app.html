@@ -523,6 +523,9 @@
       </section>
     </div>
 
+    <!-- The Check-in Date rule (ADR-0011). A plain browser script, not a module: this document
+         has no node integration. The same file is `require`d by `test/portal-dates.test.mjs`. -->
+    <script src="portal-dates.js"></script>
     <script>
       'use strict';
 
@@ -1736,6 +1739,7 @@
           // T3-11: a fresh document is a new page appearance — re-arm the auto-insert one-shot so
           // a reload/renavigation to the import form fires again (design contract 3).
           rec.autoInsertFired = false;
+          rec.checkinDateFired = false;
           if (active()) renderPortalChrome();
           /**
            * 4e's re-injection hook, per webview (4g): a navigation wiped the injected poller,
@@ -1753,6 +1757,7 @@
           // drop the banner: it described the page we just left, so it must not hover over the
           // next one. (The auto-insert that follows raises a fresh banner if it succeeds.)
           rec.autoInsertFired = false;
+          rec.checkinDateFired = false;
           if (active()) hideInsertBanner();
           if (e.url && e.url !== 'about:blank') {
             rec.url = e.url;
@@ -2328,6 +2333,96 @@
       //   · A loud verify failure does NOT auto-retry: manual ⇥ stays the retry path, unchanged.
       // ═══════════════════════════════════════════════════════════════════════════════════
 
+      // ── MO-TM30-PORTAL-DATE — the Check-in Date fill (ADR-0011) ───────────────────────────
+      //
+      // ┌─ 🔴 PORTAL NO-GO still holds (010 §8) ─────────────────────────────────────────────┐
+      // │ This adds ONE DOM write: the value of the import form's `checkInDate` input. It     │
+      // │ never clicks, never submits, never navigates, never opens the datepicker. The date  │
+      // │ the operator sees before pressing Save is the one thing that changes.               │
+      // └────────────────────────────────────────────────────────────────────────────────────┘
+      //
+      // Probed live 2026-08-07 on `#/external/ifa/import`:
+      //   · `input[formcontrolname="checkInDate"]` — the field. Its `id` is `mat-input-10`, an
+      //     Angular Material counter that renumbers with component order, so the id is NOT a
+      //     selector anyone should depend on; the form-control name is the stable anchor.
+      //   · `informDate` sits beside it carrying `readonly="true"` — the portal owns that one and
+      //     we do not touch it. Its default (today) is true by construction.
+      //   · Both are pre-filled with TODAY, so "do not overwrite an existing value" cannot mean
+      //     "only fill when empty" — the field is never empty. It means: only replace the
+      //     portal's own default, never a value a human put there. Hence `EXPECT`.
+      var CHECKIN_DATE_SELECTOR = 'input[formcontrolname="checkInDate"]';
+
+      /**
+       * Inject the fill. `value` is what to write, `expect` is the portal default we are allowed
+       * to replace — anything else in the field means a human has been here and we leave.
+       *
+       * The write goes through the native value setter and then fires `input`/`change`/`blur`,
+       * because the input is an Angular reactive-form control (`mat-datepicker-input`): poking
+       * `.value` alone updates the pixels and leaves the form model holding the old date, which
+       * is the worst of both worlds — the operator sees the new date and the portal receives the
+       * old one. Same technique 4e already uses for the login fields.
+       */
+      function buildCheckinDateScript(value, expect) {
+        return `
+          (function () {
+            var el = document.querySelector(${JSON.stringify(CHECKIN_DATE_SELECTOR)});
+            if (!el) return { ok: false, reason: 'field not found' };
+            var before = el.value || '';
+            if (before !== ${JSON.stringify(expect)}) return { ok: false, reason: 'not the default', before: before };
+            var desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+            desc.set.call(el, ${JSON.stringify(value)});
+            el.dispatchEvent(new Event("input",  { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+            el.dispatchEvent(new Event("blur",   { bubbles: true }));
+            return { ok: true, before: before, after: el.value || '' };
+          })()
+        `;
+      }
+
+      /**
+       * Fill this villa's Check-in Date once, if the rule has anything to say.
+       *
+       * Silent in three cases, all of them deliberate: an ambiguous target (two sheet-ready rows
+       * — the booking decides the date, so guessing the booking would guess the date), a rule
+       * verdict of `today` (the portal already shows today; writing it changes nothing), and a
+       * verdict of nothing at all (a future or unusable check-in).
+       */
+      function fireCheckinDateFill(villa) {
+        var cand = resolveAutoInsertCandidate(villa);
+        if (!cand.row) return;
+        var now = Date.now();
+        var verdict = window.portalCheckinDate(cand.row.checkin, now);
+        if (!verdict.value || verdict.basis === 'today') return;
+
+        var today = window.portalCheckinDate('' + new Date(now).toISOString(), now);
+        var rec = portalPool[villa];
+        if (!rec || !rec.el) return;
+        rec.el
+          .executeJavaScript(buildCheckinDateScript(verdict.value, today.value))
+          .then(function (res) {
+            if (!res || !res.ok) {
+              console.log(
+                '[tm30-helper] check-in date: not filled (' + ((res && res.reason) || 'no result') + ')'
+              );
+              return;
+            }
+            // The substitution is stated, never silent — ADR-0011 makes that a condition of the
+            // rule, because the date written can differ from the guest's actual arrival.
+            setStatusNote(
+              'check-in ' + formatCheckinDay(cand.row.checkin) + ' · filled ' + res.after +
+                ' (' + verdict.basis + ')',
+              'st-none'
+            );
+            console.log(
+              '[tm30-helper] check-in date: ' + res.before + ' → ' + res.after +
+                ' (' + verdict.basis + ', row check-in ' + cand.row.checkin + ')'
+            );
+          })
+          .catch(function () {
+            // Mid-navigation — the next page appearance re-arms the one-shot.
+          });
+      }
+
       /** ~half a second, in 4e's cadence band (AUTOFILL_POLL_MS 400 / FILLED_WATCH_MS 600). */
       var AUTO_INSERT_POLL_MS = 500;
 
@@ -2458,7 +2553,15 @@
               if (!r) return;
               if (!p || !p.present) {
                 r.autoInsertFired = false; // form gone → re-arm for its next appearance
+                r.checkinDateFired = false;
                 return;
+              }
+              // The date rides the same tick and the same page-appearance one-shot, but its OWN
+              // flag: it must still fill when the file insert declines (ambiguous target, an
+              // insert already running), and it must not re-fire when the human clears the file.
+              if (!r.checkinDateFired) {
+                r.checkinDateFired = true;
+                fireCheckinDateFill(villa);
               }
               if (r.autoInsertFired) return; // already fired for this appearance (one-shot)
               if (!p.empty) return; // the human already chose a file — never fight them
