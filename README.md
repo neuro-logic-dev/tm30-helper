@@ -245,12 +245,18 @@ gh workflow run release.yml -f dry_run=true        # прогон без ком�
 `test.yml`):
 
 ```bash
-WEB=../mo-reservation-fe
-$WEB/node_modules/.bin/tsc $WEB/src/lib/tm30.ts --outDir test/.build \
-  --module commonjs --target es2022 --moduleResolution node --strict --skipLibCheck
-node --test test/roundtrip.test.mjs      # seam-тест эмиттер↔парсер
-./test/run-handback.sh                   # правит WEB_ROOT под свой layout
+./test/run.sh            # seam-тест эмиттер↔парсер
+./test/run-handback.sh   # круг hand-back'а
 ```
+
+Оба сами находят веб-приложение (`test/web-root.js`), в том числе в раскладке
+«репозитории рядом»; `$MO_WEB_ROOT` перебивает поиск.
+
+**Автообновление выпускается только для Windows.** macOS его не получает, пока нет
+сертификата Apple Developer ID: Squirrel.Mac обновляет только подписанную и
+нотаризованную сборку, поэтому mac-фид не публикуется вовсе — фид, который мы не
+можем исполнить, заставлял бы каждый Helper на macOS качать обновление и падать на
+установке при каждой проверке. Подробности и порядок включения — в `RELEASING.md`.
 
 Локальная сборка (для отладки, не для выкладки):
 
