@@ -1,0 +1,18 @@
+#
+# Runs the gate on every push to main and every PR, so a regression is named the day it lands
+# rather than on the morning someone wants to cut a release.
+#
+name: ci
+
+on:
+  push:
+    branches: [main]
+    # Docs-only pushes do not change what the harnesses exercise.
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    uses: ./.github/workflows/test.yml

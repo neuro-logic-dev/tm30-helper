@@ -1,0 +1,287 @@
+#
+# The whole release, start to finish, on GitHub. Nothing is built on anyone's laptop — which is
+# the point: this repo previously had no Windows toolchain within reach, so v2.0.1 had to carry
+# v2.0.0's .exe forward byte-for-byte.
+#
+# Run it: Actions → release → "Run workflow" (or `gh workflow run release.yml -f bump=patch`).
+#
+# ORDER MATTERS, and this one is deliberate:
+#
+#   plan ─┬─ gate ─┬─ build (macOS → .dmg, Windows → .exe) ─── publish
+#         └────────┘
+#
+# `plan` only COMPUTES the next version — it writes nothing. The version has to be settled
+# before `build`, because it is baked into the installers; but the repository is not touched
+# until `publish`, which runs only once real artifacts exist and the gate is green. A failed
+# test therefore leaves no orphan version bump and no dangling tag behind.
+#
+# The release is created ONCE with BOTH installers attached, rather than by two racing per-OS
+# jobs. `/tm30-helper` in mo-reservation-fe downloads from `releases/latest/download/`, so a
+# release that exists with only half its assets is a live 404 for whoever clicks meanwhile.
+#
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump (ignored when "version" is filled in)'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: 'Exact version, e.g. 2.1.0 — overrides "bump"'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Build and test only — no commit, no tag, no release. Installers land as workflow artifacts.'
+        type: boolean
+        default: false
+
+# The repository default for GITHUB_TOKEN is READ. The bump commit, the tag and the release all
+# need write, and it is granted here rather than repo-wide so nothing else inherits it.
+permissions:
+  contents: write
+
+# Two releases in flight would race on the tag and on main. Queue, never cancel: a cancelled
+# publish could leave a pushed tag without its release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the version to release
+        id: resolve
+        env:
+          # Via env, never interpolated into the script body — `version` is free text from
+          # whoever pressed the button.
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            # `npm version` is the only bump arithmetic that agrees with npm's own semver.
+            # The working copy is throwaway — nothing is committed from this job.
+            npm version "$INPUT_BUMP" --no-git-tag-version --allow-same-version > /dev/null
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not a bare x.y.z version" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION"  >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"     >> "$GITHUB_OUTPUT"
+          echo "→ releasing $VERSION (tag v$VERSION)"
+
+      # Fail here, loudly and in seconds, rather than 15 minutes later at `gh release create`.
+      - name: Refuse a tag that already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          if gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::tag $TAG already exists — pick another version" >&2
+            exit 1
+          fi
+          echo "✓ $TAG is free"
+
+  # After `plan`, not beside it: a tag collision is worth knowing in 20 seconds rather than
+  # after 15 minutes of Electron harnesses.
+  gate:
+    needs: plan
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: [plan, gate]
+    timeout-minutes: 45
+    strategy:
+      # One platform failing must not cancel the other: knowing BOTH results is what tells you
+      # whether the problem is the code or that one toolchain.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+            artifact: TM30-Helper.dmg
+            name: installer-mac
+          - os: windows-latest
+            script: dist:win
+            artifact: TM30-Helper.exe
+            name: installer-win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache the Electron download
+        uses: actions/cache@v4
+        with:
+          # The macOS job fetches BOTH architectures (universal build), so this cache earns
+          # its keep most there.
+          path: |
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npm ci
+
+      # Local-only: the version is baked into the installer, but the bump is committed by
+      # `publish`, and only if everything below succeeds.
+      - name: Stamp the release version
+        shell: bash
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Build
+        run: npm run ${{ matrix.script }}
+
+      # `artifactName` in package.json emits the fixed names the download page hardcodes; this
+      # asserts that rather than trusting it, because a rename slip is invisible until an
+      # operator's download 404s.
+      - name: Verify the macOS artifact
+        if: runner.os == 'macOS'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -f "dist/TM30-Helper.dmg"
+          hdiutil attach "dist/TM30-Helper.dmg" -nobrowse -quiet -mountpoint /tmp/dmg
+          APP="/tmp/dmg/TM30 Helper.app"
+
+          GOT="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+          [ "$GOT" = "$VERSION" ] || { echo "::error::dmg carries $GOT, expected $VERSION"; exit 1; }
+
+          # Without this the app installs and simply never answers a tm30:// link.
+          /usr/libexec/PlistBuddy -c 'Print CFBundleURLTypes:0:CFBundleURLSchemes' "$APP/Contents/Info.plist" | grep -qx '    tm30' \
+            || { echo "::error::tm30:// scheme missing from the built app"; exit 1; }
+
+          # The binary is named TM30, not "TM30 Helper".
+          ARCHS="$(lipo -archs "$APP/Contents/MacOS/TM30")"
+          case "$ARCHS" in
+            *x86_64*arm64*|*arm64*x86_64*) : ;;
+            *) echo "::error::not universal — lipo reports '$ARCHS'"; exit 1 ;;
+          esac
+
+          hdiutil detach /tmp/dmg -quiet
+          echo "✓ dmg: $VERSION, universal ($ARCHS), tm30:// registered"
+
+      - name: Verify the Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "dist/TM30-Helper.exe"
+          if (-not (Test-Path $exe)) { throw "$exe was not produced" }
+          $size = (Get-Item $exe).Length
+          # A truncated or stub installer is an order of magnitude smaller than a real one.
+          if ($size -lt 40MB) { throw "$exe is only $size bytes" }
+          Write-Host "OK exe: $size bytes, ProductVersion $((Get-Item $exe).VersionInfo.ProductVersion)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+          # Long enough to grab by hand from a dry run; short enough not to hoard 260 MB a run.
+          retention-days: 14
+
+  publish:
+    needs: [plan, gate, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    steps:
+      # The EXACT commit the installers were built from. If main has moved on since, the push
+      # below is rejected as a non-fast-forward — which is the correct outcome: the artifacts
+      # would no longer match what main says.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Commit the version bump and tag it
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          git commit -m "chore: release $VERSION"
+          git tag -a "$TAG" -m "TM30 Helper $TAG"
+          git push origin "HEAD:main" --follow-tags
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: installer-*
+          merge-multiple: true
+
+      - name: Publish the release with BOTH installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ls -l dist/TM30-Helper.dmg dist/TM30-Helper.exe
+
+          cat > /tmp/notes.md <<'EOF'
+          Built end to end by CI: macOS and Windows installers come from the same commit and the
+          same version, and both were attached before the release went live.
+
+          ## Downloads
+          - **macOS** — `TM30-Helper.dmg` (universal, Intel + Apple Silicon)
+          - **Windows** — `TM30-Helper.exe` (x64, one-click)
+
+          ## Install / reinstall
+          Install over the previous version — no uninstall needed. The `tm30://` handler
+          re-registers on install.
+
+          The builds are **unsigned**. On first launch macOS Gatekeeper asks (right-click → Open),
+          and Windows SmartScreen asks (More info → Run anyway).
+
+          ---
+          EOF
+
+          gh release create "$TAG" \
+            dist/TM30-Helper.dmg \
+            dist/TM30-Helper.exe \
+            --title "TM30 Helper $TAG" \
+            --notes-file /tmp/notes.md \
+            --generate-notes
+
+      # The download page hardcodes these two URLs. Asserting them here means a broken release
+      # is caught by CI, not by an operator who cannot install.
+      - name: Verify the download page's links resolve
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/${{ github.repository }}/releases/latest/download"
+          for f in TM30-Helper.dmg TM30-Helper.exe; do
+            REMOTE="$(curl -sL -r 0-0 -D - -o /dev/null "$BASE/$f" | tr -d '\r' \
+                      | sed -n 's#^[Cc]ontent-[Rr]ange: bytes 0-0/##p' | tail -1)"
+            LOCAL="$(stat -c%s "dist/$f")"
+            [ "$REMOTE" = "$LOCAL" ] \
+              || { echo "::error::$BASE/$f serves '$REMOTE' bytes, expected $LOCAL"; exit 1; }
+            echo "✓ $f — latest/download serves $REMOTE bytes"
+          done
