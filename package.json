@@ -25,6 +25,7 @@
       "index.html",
       "window.html",
       "app.html",
+      "portal-dates.js",
       "node_modules/**/*"
     ],
     "protocols": [
