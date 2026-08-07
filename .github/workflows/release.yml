@@ -161,8 +161,14 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      # `--publish never` is load-bearing. `build.publish` in package.json is what tells the
+      # SHIPPED app where its update feed lives, so it cannot be removed — but electron-builder
+      # reads the same block at build time, detects CI, and tries to upload the artifacts
+      # itself, dying on the missing GH_TOKEN. Uploading is this workflow's job anyway: the
+      # `publish` step attaches every asset to ONE release after both platforms are green.
+      # The update-info files (latest.yml) are written to dist either way.
       - name: Build
-        run: npm run ${{ matrix.script }}
+        run: npm run ${{ matrix.script }} -- --publish never
 
       # `artifactName` in package.json emits the fixed names the download page hardcodes; this
       # asserts that rather than trusting it, because a rename slip is invisible until an
