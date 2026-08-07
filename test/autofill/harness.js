@@ -83,6 +83,23 @@ setTimeout(() => {
   app.exit(1);
 }, HARNESS_TIMEOUT_MS).unref();
 
+/*
+  🔴 A rejected promise is a FAILED RUN, not a warning.
+
+  Every scenario below runs inside an async callback, and Electron's default for an unhandled
+  rejection is to print a warning and carry on. So a throw in the middle of the suite — a moved
+  file, a selector that stopped matching — stopped the assertions without failing anything, and
+  the run ended on the timeout above with `passed`/`failed` still at whatever it had reached.
+  Observed for real: the hand-back harness could not find the web app's source, asserted nothing,
+  and exited 0. Exit loudly instead.
+*/
+process.on('unhandledRejection', (err) => {
+  out('');
+  out('\u2717 the harness crashed \u2014 unhandled rejection, so the run is INVALID, not green:');
+  out('   ' + ((err && err.stack) || err));
+  app.exit(1);
+});
+
 app.whenReady().then(async () => {
   // ── the fake portal ────────────────────────────────────────────────────────────────────
   const server = http.createServer((_req, res) => {
@@ -180,25 +197,46 @@ app.whenReady().then(async () => {
     var S = window.tm30Shell;
     return {
       status: document.getElementById('statusline').textContent.replace(/\\s+/g, ' ').trim(),
-      groups: Array.prototype.map.call(document.querySelectorAll('.vgroup'), function (g) {
+      /*
+        Q2: the session moved out of the (now removed) villa group header and into the portal
+        pane. There is ONE of it — the active villa's — so this is an object, not a list, and it
+        is null while nothing is selected: an unselected pane has no session to describe.
+      */
+      session: (function () {
+        var bar = document.getElementById('sessionbar');
+        if (bar.classList.contains('hidden')) return null;
         return {
-          villa: g.getAttribute('data-villa'),
-          cls: g.className,
-          pill: g.querySelector('.vg-pill').textContent,
-          fresh: !!g.querySelector('.vg-fresh'),
-          locked: S.isLocked(g.getAttribute('data-villa'))
+          villa: document.getElementById('sb-villa').textContent,
+          acct: document.getElementById('sb-acct').textContent,
+          cls: bar.className,
+          pill: document.getElementById('sb-pill').textContent,
+          fresh: !document.getElementById('sb-fresh').classList.contains('hidden'),
+          locked: S.isLocked(document.getElementById('sb-villa').textContent)
         };
-      }),
+      })(),
+      /*
+        Per-villa lock state without a per-villa DOM node. The group headers used to carry this
+        for EVERY villa at once; with one session bar the assertions about a villa the operator
+        is NOT looking at have to come from the model instead.
+      */
+      lockedByVilla: (function () {
+        var m = {};
+        S.state.worklist.forEach(function (r) { m[r.villa] = S.isLocked(r.villa); });
+        return m;
+      })(),
       rows: Array.prototype.map.call(document.querySelectorAll('.row'), function (r) {
         var mk = r.querySelector('.act-status');
-        var sh = r.querySelector('.act-sheet');
         var fo = r.querySelector('.act-folder');
         return {
           villa: r.getAttribute('data-villa'),
           id: r.getAttribute('data-filing-id'),
+          // NB: no backticks anywhere in this string — SNAP is itself a template literal.
+          // .primary is now worn by the locked state too: it drops to an OUTLINE (.locked)
+          // rather than losing its weight, so "is it the primary action" and "is the villa
+          // logged in" became two questions and need two flags.
           markPrimary: mk.classList.contains('primary'),
+          markLocked: mk.classList.contains('locked'),
           markDisabled: mk.disabled,
-          sheetDisabled: sh.disabled,
           folderDisabled: fo.disabled
         };
       }),
@@ -219,13 +257,21 @@ app.whenReady().then(async () => {
     out('');
     out(`   ── ${label} ${'─'.repeat(Math.max(0, 58 - label.length))}`);
     out(`      status : ${s.status}`);
-    s.groups.forEach((g) =>
-      out(`      group  : ${g.villa.padEnd(16)} pill="${g.pill}" locked=${g.locked} class="${g.cls}"`)
+    out(
+      `      session: ${
+        s.session
+          ? `${s.session.villa.padEnd(16)} pill="${s.session.pill}" locked=${s.session.locked} class="${s.session.cls}"`
+          : '— (bar hidden: no villa selected)'
+      }`
+    );
+    Object.keys(s.lockedByVilla).forEach((v) =>
+      out(`      locked : ${v.padEnd(16)} ${s.lockedByVilla[v]}`)
     );
     s.rows.forEach((r) =>
       out(
-        `      row ${r.id}: ${r.villa.padEnd(16)} mark=${r.markPrimary ? 'primary' : 'DIMMED '}` +
-          `${r.markDisabled ? '/disabled' : '/enabled '} · sheet=${r.sheetDisabled ? 'DISABLED' : 'enabled'}` +
+        `      row ${r.id}: ${r.villa.padEnd(16)} mark=${
+          r.markPrimary ? (r.markLocked ? 'primary/OUTLINED' : 'primary/filled  ') : 'not-primary    '
+        }${r.markDisabled ? '/disabled' : '/enabled '}` +
           ` · folder=${r.folderDisabled ? 'DISABLED' : 'enabled'}`
       )
     );
@@ -237,7 +283,6 @@ app.whenReady().then(async () => {
   }
 
   const rowsOf = (s, villa) => s.rows.filter((r) => r.villa === villa);
-  const groupOf = (s, villa) => s.groups.filter((g) => g.villa === villa)[0];
   const poolOf = (s, villa) => s.pool.filter((p) => p.villa === villa)[0];
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -251,20 +296,17 @@ app.whenReady().then(async () => {
     check('4g: the pool is LAZY — no webview exists before the first selection',
       s.pool.length === 0, s.pool);
     check('4g: tm30Shell.portal is null before the first selection', s.activePortal === null);
-    check('4g: every group carries the ↻ fresh-login control (creds or not)',
-      s.groups.every((g) => g.fresh), s.groups);
-    check('credentialled villa renders LOCKED', groupOf(s, 'Villa Suriyan 2').locked === true);
+    check('Q2: the session bar is HIDDEN before any selection — no villa, no session',
+      s.session === null, s.session);
+    check('credentialled villa renders LOCKED', s.lockedByVilla['Villa Suriyan 2'] === true);
     check('cred-less villa is NOT locked (it is manual login)',
-      groupOf(s, 'Villa Baan Ork').locked === false &&
-        groupOf(s, 'Villa Baan Ork').pill === 'manual login');
-    check('locked villa: mark-submitted is DIMMED but still ENABLED',
-      rowsOf(s, 'Villa Suriyan 2').every((r) => !r.markPrimary && !r.markDisabled));
-    check('🔴 locked villa: ⬇ xlsx stays ENABLED (Drive-side, not portal-gated)',
-      rowsOf(s, 'Villa Suriyan 2').every((r) => !r.sheetDisabled));
+      s.lockedByVilla['Villa Baan Ork'] === false);
+    check('locked villa: mark-submitted is OUTLINED but still ENABLED',
+      rowsOf(s, 'Villa Suriyan 2').every((r) => r.markPrimary && r.markLocked && !r.markDisabled));
     check('🔴 locked villa: 📁 folder stays ENABLED (Drive-side, not portal-gated)',
       rowsOf(s, 'Villa Suriyan 2').every((r) => !r.folderDisabled));
-    check('cred-less villa: mark-submitted is NOT dimmed (never gated on a session it cannot get)',
-      rowsOf(s, 'Villa Baan Ork').every((r) => r.markPrimary));
+    check('cred-less villa: mark-submitted is FILLED (never gated on a session it cannot get)',
+      rowsOf(s, 'Villa Baan Ork').every((r) => r.markPrimary && !r.markLocked));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -314,7 +356,7 @@ app.whenReady().then(async () => {
     check('🔴 fields exist but the token is empty → still NOTHING typed',
       f.userExists && f.passExists && f.user === '' && f.pass === '', f);
     check('status still reads "waiting for captcha…"', /waiting for captcha…/.test(s.status), s.status);
-    check('villa is still locked', groupOf(s, 'Villa Suriyan 2').locked === true);
+    check('villa is still locked', s.lockedByVilla['Villa Suriyan 2'] === true);
 
     await sleep(3000); // t≈5.2s — the "human" cleared it at t=3.5s
     s = await R(SNAP);
@@ -327,14 +369,16 @@ app.whenReady().then(async () => {
     check('status reads "credentials filled ✓"', /credentials filled ✓/.test(s.status), s.status);
     check('villaSession written, keyed by VILLA (AMB-1)',
       s.sessions.length === 1 && s.sessions[0] === 'Villa Suriyan 2', s.sessions);
-    check('group unlocked: pill → 🔓 session open',
-      groupOf(s, 'Villa Suriyan 2').pill === '🔓 session open' &&
-        groupOf(s, 'Villa Suriyan 2').locked === false);
-    check('🔴 ONE solve unlocked BOTH filings in the group (014 §7.2)',
+    check('session bar unlocked: pill → "session open"',
+      s.session.villa === 'Villa Suriyan 2' &&
+        /session open/.test(s.session.pill) &&
+        /open-session/.test(s.session.cls) &&
+        s.session.locked === false, s.session);
+    check('🔴 ONE solve unlocked BOTH of this villa\'s filings (014 §7.2)',
       rowsOf(s, 'Villa Suriyan 2').length === 2 &&
-        rowsOf(s, 'Villa Suriyan 2').every((r) => r.markPrimary));
+        rowsOf(s, 'Villa Suriyan 2').every((r) => r.markPrimary && !r.markLocked));
     check('the OTHER credentialled villa stayed locked (per-villa, not global)',
-      groupOf(s, 'Villa Anda').locked === true);
+      s.lockedByVilla['Villa Anda'] === true, s.lockedByVilla);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -403,7 +447,7 @@ app.whenReady().then(async () => {
     check('🔴 4g: A\'s superseded poller was torn down in A\'s page — nothing typed there',
       fA.user === '' && fA.pass === '' && fA.pollerLive === false, fA);
     check('session belongs to B only', s.sessions.length === 1 && s.sessions[0] === 'Villa Anda', s.sessions);
-    check('villa A is still locked', groupOf(s, 'Villa Suriyan 2').locked === true);
+    check('villa A is still locked', s.lockedByVilla['Villa Suriyan 2'] === true);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -422,11 +466,12 @@ app.whenReady().then(async () => {
     check('4g: the cred-less villa still got its own webview + partition',
       poolOf(s, 'Villa Baan Ork') &&
         poolOf(s, 'Villa Baan Ork').partition === PART('Villa Baan Ork'), s.pool);
-    check('pill reads "manual login", not an error', groupOf(s, 'Villa Baan Ork').pill === 'manual login');
-    check('group class is no-acct (never "locked")',
-      /no-acct/.test(groupOf(s, 'Villa Baan Ork').cls) && !/\blocked\b/.test(groupOf(s, 'Villa Baan Ork').cls));
-    check('its ⬇ xlsx and 📁 folder work',
-      rowsOf(s, 'Villa Baan Ork').every((r) => !r.sheetDisabled && !r.folderDisabled));
+    check('pill reads "manual login", not an error', s.session.pill === 'manual login');
+    check('session bar class is no-acct (never "locked")',
+      /no-acct/.test(s.session.cls) && !/\blocked\b/.test(s.session.cls), s.session.cls);
+    check('the account slot says so calmly, not as a fault',
+      s.session.acct === 'no portal credentials yet', s.session.acct);
+    check('its 📁 folder works', rowsOf(s, 'Villa Baan Ork').every((r) => !r.folderDisabled));
     check('no session, no captcha-wait status',
       s.sessions.length === 0 && !/waiting for captcha/.test(s.status), s.status);
   }
@@ -495,7 +540,7 @@ app.whenReady().then(async () => {
       marker === 'A-alive', marker);
     check('A\'s filled fields survived too', fA.user === SURIYAN.login && fA.pass === SURIYAN.pass, fA);
     check('A is the active portal again and its pill still reads 🔓',
-      s.activePortal === 'Villa Suriyan 2' && groupOf(s, 'Villa Suriyan 2').pill === '🔓 session open');
+      s.activePortal === 'Villa Suriyan 2' && /session open/.test(s.session.pill));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -523,7 +568,7 @@ app.whenReady().then(async () => {
     show('villa B selected after A filled', s);
     check('🔴 villa B did NOT inherit villa A\'s fill as a session',
       s.sessions.indexOf('Villa Anda') < 0, s.sessions);
-    check('villa B is still locked', groupOf(s, 'Villa Anda').locked === true);
+    check('villa B is still locked', s.lockedByVilla['Villa Anda'] === true);
     check('villa B still reads "waiting for captcha…"', /waiting for captcha…/.test(s.status), s.status);
 
     // The same-villa half: clear A's session STATE only — no navigation, no teardown, so the
@@ -560,17 +605,22 @@ app.whenReady().then(async () => {
     wcA.on('did-start-navigation', onNav);
 
     const s0 = await R(SNAP);
-    check('precondition: session open, pill 🔓',
+    check('precondition: session open, pill says so',
       s0.sessions.indexOf('Villa Suriyan 2') >= 0 &&
-        groupOf(s0, 'Villa Suriyan 2').pill === '🔓 session open');
+        s0.session.villa === 'Villa Suriyan 2' &&
+        /session open/.test(s0.session.pill), s0.session);
 
-    await R('document.querySelector(\'.vgroup[data-villa="Villa Suriyan 2"] .vg-fresh\').click(); true');
+    // Q2: one control, in the portal pane, acting on the ACTIVE villa — which is Suriyan 2 here
+    // (the scenario selected it to open the session it is about to reset).
+    check('precondition: the fresh-login control is the active villa\'s', s0.session.fresh === true);
+    await R('document.getElementById("sb-fresh").click(); true');
     await sleep(900); // IPC round-trip + loadURL initiated
 
     let s = await R(SNAP);
     show('right after ↻ fresh login', s);
     check('villaSession entry is gone — this villa\'s ONLY', s.sessions.indexOf('Villa Suriyan 2') < 0, s.sessions);
-    check('pill is back to 🔒 log in', groupOf(s, 'Villa Suriyan 2').pill === '🔒 log in');
+    check('pill is back to "log in"',
+      /log in/.test(s.session.pill) && s.session.locked === true, s.session);
     check('status reads "waiting for captcha…" again — autofill re-armed as on first selection',
       /waiting for captcha…/.test(s.status) && s.pending.villa === 'Villa Suriyan 2', s);
     check('🔴 the webview was sent to the PORTAL ROOT — the one allowed navigation',
@@ -604,12 +654,15 @@ app.whenReady().then(async () => {
     const onNav = (_e, url) => navs.push(url);
     wcB.on('did-start-navigation', onNav);
 
-    await R('document.querySelector(\'.vgroup[data-villa="Villa Baan Ork"] .vg-fresh\').click(); true');
+    // The cred-less villa is the active one (selected above), so the pane's control is its own.
+    await R('document.getElementById("sb-fresh").click(); true');
     await sleep(900);
 
     const s = await R(SNAP);
     show('cred-less villa after ↻ fresh login', s);
-    check('pill STAYS "manual login"', groupOf(s, 'Villa Baan Ork').pill === 'manual login');
+    check('the control is offered to a cred-less villa too — it restarts a MANUAL login',
+      s.session.villa === 'Villa Baan Ork' && s.session.fresh === true, s.session);
+    check('pill STAYS "manual login"', s.session.pill === 'manual login');
     check('nothing pending — no autofill exists to re-arm', s.pending.villa === null, s.pending);
     check('the webview went back to the portal root for a manual login',
       navs.some((u) => String(u).indexOf('https://tm30.immigration.go.th') === 0), navs);

@@ -32,8 +32,15 @@ const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const HELPER = path.resolve(__dirname, '..', '..'); // desktop/tm30-helper
-const WEB = path.resolve(HELPER, '..', '..'); // mo-reservation-fe
+const HELPER = path.resolve(__dirname, '..', '..'); // the Helper checkout
+/*
+  🔴 Resolved, never counted upward. `HELPER/../..` is only mo-reservation-fe while this repo is
+  nested inside it; in a standalone checkout it landed on a directory with no `src/`, the three
+  `read()` calls below threw inside an async callback, and Electron turned that into a warning
+  rather than an exit — so this harness timed out having asserted nothing and still exited 0.
+  `resolveWebRoot` throws with every path it tried, which is what a missing web app deserves.
+*/
+const WEB = require('../web-root.js').resolveWebRoot();
 const { RETURN_URL, BOOKING_ID, ORIGIN } = require('./fixture.js');
 
 const out = (s) => process.stdout.write(s + '\n');
@@ -76,6 +83,23 @@ setTimeout(() => {
   out('✗ the harness timed out — nothing finished it.');
   app.exit(1);
 }, HARNESS_TIMEOUT_MS).unref();
+
+/*
+  🔴 A rejected promise is a FAILED RUN, not a warning.
+
+  Every scenario below runs inside an async callback, and Electron's default for an unhandled
+  rejection is to print a warning and carry on. So a throw in the middle of the suite — a moved
+  file, a selector that stopped matching — stopped the assertions without failing anything, and
+  the run ended on the timeout above with `passed`/`failed` still at whatever it had reached.
+  Observed for real: the hand-back harness could not find the web app's source, asserted nothing,
+  and exited 0. Exit loudly instead.
+*/
+process.on('unhandledRejection', (err) => {
+  out('');
+  out('\u2717 the harness crashed \u2014 unhandled rejection, so the run is INVALID, not green:');
+  out('   ' + ((err && err.stack) || err));
+  app.exit(1);
+});
 
 /**
  * `main.js` calls `win.loadFile('app.html')` — a path relative to the APP ROOT, which Electron
@@ -203,8 +227,15 @@ app.whenReady().then(async () => {
       /cannot see whether it was recorded/.test(s.msg || ''), s.msg);
     check('🔴 it does NOT claim "✓ Submitted" — the server\'s word, which never arrived',
       !/✓ Submitted/.test(s.btn), s.btn);
+    /*
+      The label lost the word "web" and its ↗ when the row went to one line and to SVG icons
+      ("Reopen confirm"), so this matches the stem rather than the sentence. What it must NOT
+      go soft on is the reason the control exists: the button stays LIVE — the Helper never saw
+      the outcome, so it can never decide the operator is finished — and it still explains that
+      in its title rather than presenting itself as a bare, unexplained second chance.
+    */
     check('the confirm can be reopened (browser tab closed too early)',
-      /Reopen web confirm/.test(s.btn) && !s.disabled, s);
+      /Reopen/.test(s.btn) && !s.disabled && /cannot see whether you confirmed/.test(s.title || ''), s);
 
     const note = await R("document.getElementById('statusline').textContent.replace(/\\s+/g,' ').trim()");
     out(`      status : ${note}`);
