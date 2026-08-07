@@ -66,6 +66,11 @@ const wireRowWithAccount = {
     },
     sheet_download_url: 'https://drive.google.com/uc?export=download&id=1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVw',
     folder_url: 'https://drive.google.com/drive/folders/1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVw',
+    // Display-only, and both were silently dropped by `normalizeRow` for as long as they had
+    // been on the wire — the emitter forwarded them, the parser's allowlist did not copy them,
+    // and the pane just showed less. This seam is where that had to be caught.
+    checkout: '2026-07-26',
+    internal_id: 'C100-22072026-001',
 };
 
 /** The DAILY case (014 §7.9): credentials start empty, so `account` is simply absent. */
@@ -112,6 +117,11 @@ test('(a) v2 round-trip: a row with credentials survives emitter → parser inta
     assert.equal(row.sheet_download_url, wireRowWithAccount.sheet_download_url);
     assert.equal(row.folder_url, wireRowWithAccount.folder_url);
 
+    // The stay's end and the human booking reference — display-only, but the pane prints both,
+    // so a drop here is invisible rather than loud.
+    assert.equal(row.checkout, wireRowWithAccount.checkout);
+    assert.equal(row.internal_id, wireRowWithAccount.internal_id);
+
     // return_url is derived by the EMITTER from booking_id — the backend deliberately does not
     // send it (014 §7.3 defect 2). It must arrive with `tab` and `confirm` intact.
     assert.equal(row.return_url, buildTm30ReturnUrl(wireRowWithAccount.booking_id, ORIGIN));
@@ -136,6 +146,11 @@ test('(b) v2 round-trip: a cred-less row is KEPT, and `account` is omitted, neve
     // 🔴 Absent, not empty. `{login:'',pass:''}` — always present, never usable — is the shape
     // that made the v2 branch dead code (013 §5). Assert the KEY is gone, not merely falsy.
     assert.ok(!('account' in row), '`account` key must be absent, not an empty object');
+
+    // Same omission style for the display-only pair: this fixture carries neither, so neither
+    // key may be invented. A backend older than these fields is not an error.
+    assert.ok(!('checkout' in row), '`checkout` must be absent, not an empty string');
+    assert.ok(!('internal_id' in row), '`internal_id` must be absent, not an empty string');
 });
 
 test('(b2) the emitted JSON itself never contains an empty-but-present account', () => {

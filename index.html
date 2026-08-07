@@ -40,8 +40,15 @@
 <main>
   <h1>TM30 Helper</h1>
   <p>This app is launched from the dashboard: press the TM30 button there to open your filing queue.</p>
-  <p class="version">Version 2.0.0</p>
+  <p class="version" id="version"></p>
 </main>
+
+<script>
+  // Fed by main.js from app.getVersion() — never hard-code it here: the app
+  // updates itself, and a literal would start lying the first time it does.
+  const v = new URLSearchParams(location.search).get("v");
+  document.getElementById("version").textContent = v ? "Version " + v : "";
+</script>
 
 </body>
 </html>

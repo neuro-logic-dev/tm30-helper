@@ -1,0 +1,1340 @@
+{
+ "checksum": "da7de070d22bd884ce7df5d9d14752b73992ffa4e4e8145daa25ea1d48f1020d",
+ "nationalities": [
+  {
+   "code": "AFG",
+   "th": "รัฐอิสลามอัฟกานิสถาน",
+   "en": "THE ISLAMIC STATE OF AFGHANISTAN"
+  },
+  {
+   "code": "ALB",
+   "th": "สาธารณรัฐแอลเบเนีย",
+   "en": "THE REPUBLIC OF ALBANIA"
+  },
+  {
+   "code": "DZA",
+   "th": "สาธารณรัฐประชาธิปไตยประชาชนแอลจิเรีย",
+   "en": "THE PEPLE'S DEMOCRATIC REPUBLIC OF ALGERIA"
+  },
+  {
+   "code": "USA",
+   "th": "สหรัฐอเมริกา",
+   "en": "THE UNITED STATES OF AMERICA"
+  },
+  {
+   "code": "AGO",
+   "th": "สาธารณรัฐแองโกลา",
+   "en": "REPUBLIC OF ANGOLA"
+  },
+  {
+   "code": "ARG",
+   "th": "สาธารณรัฐอาร์เจนตินา",
+   "en": "ARGENTINE REPUBLIC"
+  },
+  {
+   "code": "AUS",
+   "th": "ออสเตรเลีย",
+   "en": "AUSTRALIA"
+  },
+  {
+   "code": "AUT",
+   "th": "สาธารณรัฐออสเตรีย",
+   "en": "THE REPUBLIC OF AUSTRIA"
+  },
+  {
+   "code": "AND",
+   "th": "ราชรัฐอันดอร์รา",
+   "en": "THE PRINCIPALITY OF ANDORRA"
+  },
+  {
+   "code": "ALD",
+   "th": "อัลมาดินา",
+   "en": "ALMADINAH"
+  },
+  {
+   "code": "ATG",
+   "th": "แอนติกาและบาร์บูดา",
+   "en": "ANTIGUA AND BARBUDA"
+  },
+  {
+   "code": "ARM",
+   "th": "สาธารณรัฐอาร์เมเนีย",
+   "en": "THE REPUBLIC OF ARMENIA"
+  },
+  {
+   "code": "AZE",
+   "th": "สาธารณรัฐอาเชอร์ไบจาน",
+   "en": "THE AZERBAIJANI REPUBLIC"
+  },
+  {
+   "code": "AIA",
+   "th": "แองกูล่า",
+   "en": "ANGUILLA"
+  },
+  {
+   "code": "ANT",
+   "th": "เนเธอร์แลนด์ แอนทิลล์",
+   "en": "NETHERLANDS ANTILLES"
+  },
+  {
+   "code": "ATF",
+   "th": "เฟรนช์เซาเทิร์นและแอนตาร์กติกแลนส์",
+   "en": "FRENCH SOUTHERN TERRIORIES"
+  },
+  {
+   "code": "AWB",
+   "th": "อารูบา",
+   "en": "ARUBA"
+  },
+  {
+   "code": "ASM",
+   "th": "อเมริกันซามัว",
+   "en": "AMERICA SAMOA"
+  },
+  {
+   "code": "BHS",
+   "th": "เครือรัฐบาฮามาส",
+   "en": "THE COMMONWEALTH OF THE BAHAMAS"
+  },
+  {
+   "code": "BHR",
+   "th": "รัฐบาห์เรน",
+   "en": "THE STATE OF BAHRAIN"
+  },
+  {
+   "code": "BGD",
+   "th": "สาธารณรัฐประชาชนบังกลาเทศ",
+   "en": "THE PEOPLE'S REPUBLIC OF BANGLADESH"
+  },
+  {
+   "code": "BRB",
+   "th": "บาร์เบโดส",
+   "en": "BARBADOS"
+  },
+  {
+   "code": "BEL",
+   "th": "ราชอาณาจักรเบลเยียม",
+   "en": "THE KINGDOM OF BELGIUM"
+  },
+  {
+   "code": "BMU",
+   "th": "เบอร์มูดาส์",
+   "en": "BERMUDA"
+  },
+  {
+   "code": "BOL",
+   "th": "รัฐพหุชนชาติแห่งโบลิเวีย",
+   "en": "PLURINATIONAL STATE OF BOLIVIA"
+  },
+  {
+   "code": "BWA",
+   "th": "สาธารณรัฐบอตสวานา",
+   "en": "THE REPUBLIC OF BOTSWANA"
+  },
+  {
+   "code": "BRA",
+   "th": "สหพันธ์สาธารณรัฐบราซิล",
+   "en": "FEDERATIVE REPUBLIC OF BRAZIL"
+  },
+  {
+   "code": "GBR",
+   "th": "สหราชอาณาจักร",
+   "en": "THE UNITED KINGDOM OF GREAT BRITAIN"
+  },
+  {
+   "code": "B13",
+   "th": "อังกฤษ-ฮ่องกง",
+   "en": "BRITISH (HK)"
+  },
+  {
+   "code": "BRN",
+   "th": "เนการาบรูไนดารุสซาลาม",
+   "en": "BRUNEI DARUSSALAM"
+  },
+  {
+   "code": "BGR",
+   "th": "สาธารณรัฐบัลแกเรีย",
+   "en": "THE REPUBLIC OF BULGARIA"
+  },
+  {
+   "code": "MMR",
+   "th": "สหภาพเมียนมา",
+   "en": "THE UNION OF MYANMAR"
+  },
+  {
+   "code": "B17",
+   "th": "โคโลนีอังกฤษ",
+   "en": "BRITISH COLONY"
+  },
+  {
+   "code": "BEN",
+   "th": "สาธารณรัฐเบนิน",
+   "en": "REPUBLIC OF BENIN"
+  },
+  {
+   "code": "BDI",
+   "th": "สาธารณรัฐบุรุนดี",
+   "en": "REPUBLIC OF BURUNDI"
+  },
+  {
+   "code": "BTN",
+   "th": "ราชอาณาจักรภูฎาน",
+   "en": "THE KINGDOM OF BHUTAN"
+  },
+  {
+   "code": "BLZ",
+   "th": "เบลิซ",
+   "en": "BELIZE"
+  },
+  {
+   "code": "BFA",
+   "th": "บูร์กินาฟาโซ",
+   "en": "BURKINAH FASO"
+  },
+  {
+   "code": "BIH",
+   "th": "สาธารณรัฐบอสเนีย-เฮอร์เซโกวินา",
+   "en": "BOSNIA AND HERZEGOVINA"
+  },
+  {
+   "code": "BLR",
+   "th": "สาธารณรัฐเบลารุส",
+   "en": "THE REPUBLIC OF BELARUS"
+  },
+  {
+   "code": "BVT",
+   "th": "หมู่เกาะโบเวท",
+   "en": "BOUVET ISLAND"
+  },
+  {
+   "code": "GBN",
+   "th": "ไอร์แลนด์เหนือ",
+   "en": "UNITED KINGDOM OF GREAT BRITIAN AND NORTHERN IRELAND"
+  },
+  {
+   "code": "KHM",
+   "th": "ราชอาณาจักรกัมพูชา",
+   "en": "THE KINGDOM OF CAMBODIA"
+  },
+  {
+   "code": "CMR",
+   "th": "สาธารณรัฐแคเมอรูน",
+   "en": "REPUBLIC OF CAMEROON"
+  },
+  {
+   "code": "CAN",
+   "th": "แคนาดา",
+   "en": "CANADA"
+  },
+  {
+   "code": "C04",
+   "th": "หมู่เกาะคาโรไลน์",
+   "en": "CAROLINE ISLANDS"
+  },
+  {
+   "code": "CYM",
+   "th": "หมู่เกาะเคย์แมน",
+   "en": "CAYMAN ISLANDS"
+  },
+  {
+   "code": "CAF",
+   "th": "สาธารณรัฐแอฟริกากลาง",
+   "en": "CENTRAL AFRICA REPUBLIC"
+  },
+  {
+   "code": "LKA",
+   "th": "สาธารณรัฐสังคมนิยมประชาธิปไตยศรีลังกา",
+   "en": "THE DEMOCRATIC SOCIALIST REPUBLIC OF SRI LANKA"
+  },
+  {
+   "code": "TCD",
+   "th": "สาธารณรัฐชาด",
+   "en": "REPUBLIC OF CHAD"
+  },
+  {
+   "code": "CHL",
+   "th": "สาธารณรัฐชิลี",
+   "en": "THE REPUBLIC OF CHILE"
+  },
+  {
+   "code": "CHN",
+   "th": "สาธารณรัฐประชาชนจีน",
+   "en": "THE PEOPLE'S REPUBLIC OF CHINA"
+  },
+  {
+   "code": "COL",
+   "th": "สาธารณรัฐโคลอมเบีย",
+   "en": "THE REPUBLIC OF COLOMBIA"
+  },
+  {
+   "code": "COG",
+   "th": "สาธารณรัฐคองโก",
+   "en": "THE REPUBLIC OF THE CONGO"
+  },
+  {
+   "code": "CRI",
+   "th": "สาธารณรัฐคอสตาริกา",
+   "en": "THE REPUBLIC OF COSTA RICA"
+  },
+  {
+   "code": "CUB",
+   "th": "สาธารณรัฐคิวบา",
+   "en": "THE REPUBLIC OF CUBA"
+  },
+  {
+   "code": "C15",
+   "th": "เกาะคูราเซา",
+   "en": "CURACAO"
+  },
+  {
+   "code": "CYP",
+   "th": "สาธารณรัฐไซปรัส",
+   "en": "THE REPUBLIC OF CYPRUS"
+  },
+  {
+   "code": "CZE",
+   "th": "สาธารณรัฐเช็ก",
+   "en": "CZECH REPUBLIC"
+  },
+  {
+   "code": "CPV",
+   "th": "สาธารณรัฐเคปเวิร์ด",
+   "en": "THE REPUBLIC OF CAPE VERDE"
+  },
+  {
+   "code": "COM",
+   "th": "สหพันธ์สาธารณรัฐอิสลาม",
+   "en": "THE ISIAMIC FEDERAL REPUBLIC OF THE COMOROS"
+  },
+  {
+   "code": "COK",
+   "th": "หมู่เกาะคุก",
+   "en": "THE COOK ISLANDS"
+  },
+  {
+   "code": "HRV",
+   "th": "สาธารณรัฐโครเอเชีย",
+   "en": "THE REPUBLIC OF CROATIA"
+  },
+  {
+   "code": "CCK",
+   "th": "หมู่เกาะโคโคส, หมู่เกาะคีลิง",
+   "en": "COCOS (KEELING) ISLANDS"
+  },
+  {
+   "code": "CXR",
+   "th": "เกาะคริสต์มาส",
+   "en": "CHRISTMAS ISLAND"
+  },
+  {
+   "code": "COD",
+   "th": "สาธารณรัฐประชาธิปไตยคองโก",
+   "en": "DEMOCRATIC  REPUBLIC OF THE CONGO"
+  },
+  {
+   "code": "D02",
+   "th": "ไดโต",
+   "en": "DAITO"
+  },
+  {
+   "code": "DNK",
+   "th": "ราชอาณาจักรเดนมาร์ก",
+   "en": "THE KINGDOM OF DENMARK"
+  },
+  {
+   "code": "DOM",
+   "th": "สาธารณรัฐโดมินิกัน",
+   "en": "THE DOMINICAN REPUBLIC"
+  },
+  {
+   "code": "NLD",
+   "th": "ราชอาณาจักรเนเธอร์แลนด์",
+   "en": "THE KINGDOM OF NETHERLANDS"
+  },
+  {
+   "code": "DIM",
+   "th": "ดินามาร์คซ",
+   "en": "DINAMARCZ"
+  },
+  {
+   "code": "D07",
+   "th": "เดอวอยต์",
+   "en": "D'VOIKE"
+  },
+  {
+   "code": "DJI",
+   "th": "สาธารณรัฐจิบูตี",
+   "en": "THE REPUBLIC OF DJIBOUTI"
+  },
+  {
+   "code": "DMA",
+   "th": "เครือรัฐโดมิกา",
+   "en": "THE COMMONWEALTH OF DOMINICA"
+  },
+  {
+   "code": "E01",
+   "th": "เยอรมันตะวันออก",
+   "en": "EAST GERMAN"
+  },
+  {
+   "code": "ECU",
+   "th": "สาธารณรัฐเอกวาดอร์",
+   "en": "REPUBLIC OF ECUADOR"
+  },
+  {
+   "code": "EGY",
+   "th": "สาธารณรัฐอียิปต์",
+   "en": "THE ARAB REPUBLIC OF EGYPT"
+  },
+  {
+   "code": "ETH",
+   "th": "สหพันธ์สาธารณรัฐประชาธิปไตยเอธิโอเปีย",
+   "en": "FEDERAL DEMOCRATIC REPUBLIC OF ETHIOPIA"
+  },
+  {
+   "code": "SLV",
+   "th": "สาธารณรัฐเอลซัลวาดอร์",
+   "en": "THE REPUBLIC OF EL SALVADOR"
+  },
+  {
+   "code": "GNQ",
+   "th": "สาธารณรัฐอิเควทอเรียลกินี",
+   "en": "REPUBLIC OF EQUATORIAL GUINEA"
+  },
+  {
+   "code": "EST",
+   "th": "สาธารณรัฐเอสโตเนีย",
+   "en": "ESTONIA"
+  },
+  {
+   "code": "ERI",
+   "th": "เอริเทรีย",
+   "en": "ERITREA"
+  },
+  {
+   "code": "TMP",
+   "th": "สาธารณรัฐติมอร์ตะวันออก",
+   "en": "REPUBLIC EAST TIMOR"
+  },
+  {
+   "code": "FRO",
+   "th": "หมู่เกาะแฟโรส์",
+   "en": "FAEROES"
+  },
+  {
+   "code": "FJI",
+   "th": "สาธารณรัฐหมู่เกาะฟิจิ",
+   "en": "THE REPUBLIC OF FIJI"
+  },
+  {
+   "code": "FIN",
+   "th": "สาธารณรัฐฟินแลนด์",
+   "en": "THE REPUBLIC OF FINLAND"
+  },
+  {
+   "code": "FRA",
+   "th": "สาธารณรัฐฝรั่งเศส",
+   "en": "THE FRANCE REPUBLIC"
+  },
+  {
+   "code": "FLK",
+   "th": "หมู่เกาะฟอล์กแลนด์ (มัลบีนัส)",
+   "en": "FALKLAND ISLANDS (MALVINAS)"
+  },
+  {
+   "code": "FXX",
+   "th": "ฟรานส์ เมโทรโปริแทรน",
+   "en": "FRANCE METROPOLITAN"
+  },
+  {
+   "code": "GAB",
+   "th": "สาธารณรัฐกาบอง",
+   "en": "GABONESE REPUBLIC"
+  },
+  {
+   "code": "GMB",
+   "th": "สาธารณรัฐอิสลามแกมเบีย",
+   "en": "THE ISLAM REPUBLIC OF THE GAMBIA"
+  },
+  {
+   "code": "DEU",
+   "th": "สหพันธสาธารณรัฐเยอรมันนี",
+   "en": "THE FEDERAL REPUBLIC OF GERMANY"
+  },
+  {
+   "code": "GHA",
+   "th": "สาธารณรัฐกานา",
+   "en": "REPUBLIC OF GHANA"
+  },
+  {
+   "code": "GRC",
+   "th": "สาธารณรัฐเฮลเลนิก",
+   "en": "THE HELLENIC REPUBLIC"
+  },
+  {
+   "code": "GRL",
+   "th": "กรีนแลนด์",
+   "en": "GREENLAND"
+  },
+  {
+   "code": "GLP",
+   "th": "กวาเดอลูป",
+   "en": "GUADELOUPE"
+  },
+  {
+   "code": "GTM",
+   "th": "สาธารณรัฐกัวเตมาลา",
+   "en": "THE REPUBLIC OF GUATEMALA"
+  },
+  {
+   "code": "GIN",
+   "th": "กินี",
+   "en": "REPUBLIC OF GUINEA"
+  },
+  {
+   "code": "GUY",
+   "th": "สาธารณรัฐสหกรณ์กายอานา",
+   "en": "CO-OPERATIVE REPUBLIC OF GUYANA"
+  },
+  {
+   "code": "GUM",
+   "th": "กวม",
+   "en": "GUAM"
+  },
+  {
+   "code": "GRD",
+   "th": "เกรนาดา",
+   "en": "GRENADA"
+  },
+  {
+   "code": "GNB",
+   "th": "สาธารณรัฐกีนี-บิสเซา",
+   "en": "REPUBLIC OF GUINEA-BISSAU"
+  },
+  {
+   "code": "GEO",
+   "th": "สาธารณรัฐจอร์เจีย",
+   "en": "GEORGIA"
+  },
+  {
+   "code": "GIB",
+   "th": "ยิบรอลตาร์",
+   "en": "GIBRALTAR"
+  },
+  {
+   "code": "GUF",
+   "th": "เฟรนช์เกียนา",
+   "en": "FRENCH GUIANA"
+  },
+  {
+   "code": "HTI",
+   "th": "สาธารณรัฐเฮติ",
+   "en": "THE REPUBLIC OF HAITI"
+  },
+  {
+   "code": "HND",
+   "th": "สาธารณรัฐฮอนดูรัส",
+   "en": "THE REPUBLIC OF HONDURAS"
+  },
+  {
+   "code": "HUN",
+   "th": "สาธารณรัฐฮังการี",
+   "en": "THE REPUBLIC OF HUNGARY"
+  },
+  {
+   "code": "HKG",
+   "th": "ฮ่องกง",
+   "en": "CHINA-HONG KONG"
+  },
+  {
+   "code": "HMD",
+   "th": "เกาะเฮิร์ดและหมู่เกาะแมกดอนัลด์",
+   "en": "HEARD AND MCDONALD ISLANDS"
+  },
+  {
+   "code": "ISL",
+   "th": "สาธารณรัฐไอซ์แลนด์",
+   "en": "THE REPUBLIC OF ICELAND"
+  },
+  {
+   "code": "IND",
+   "th": "สาธารณรัฐอินเดีย",
+   "en": "THE REPUBLIC OF INDIA"
+  },
+  {
+   "code": "IDN",
+   "th": "สาธารณรัฐอินโดนีเซีย",
+   "en": "THE REPUBLIC OF INDONESIA"
+  },
+  {
+   "code": "IRN",
+   "th": "สาธารณรัฐอิหร่าน",
+   "en": "THE ISLAMIC REPUBLIC OF IRAN"
+  },
+  {
+   "code": "IRQ",
+   "th": "สาธารณรัฐอิรัก",
+   "en": "THE REPUBLIC OF IRAQ"
+  },
+  {
+   "code": "IRL",
+   "th": "ไอร์แลนด์",
+   "en": "IRELAND"
+  },
+  {
+   "code": "ISR",
+   "th": "รัฐอิสราเอล",
+   "en": "THE STATE OF ISRAEL"
+  },
+  {
+   "code": "ITA",
+   "th": "สาธารณรัฐอิตาลี",
+   "en": "THE ITALIAN REPUBLIC"
+  },
+  {
+   "code": "CIV",
+   "th": "สาธารณรัฐโกตดิวัวร์",
+   "en": "Republic of Cote d’Ivoire"
+  },
+  {
+   "code": "IOT",
+   "th": "บริติชอินเดียนโอเชียนเทร์ริทอรี",
+   "en": "BRITISH INDIAN OCEAN TERR."
+  },
+  {
+   "code": "JAM",
+   "th": "จาเมกา",
+   "en": "JAMAICA"
+  },
+  {
+   "code": "JPN",
+   "th": "ญี่ปุ่น",
+   "en": "JAPAN"
+  },
+  {
+   "code": "JOR",
+   "th": "ราชอาณาจักรฮัชไมต์จอร์แดน",
+   "en": "THE HASHEMITE KINGDOM OF JORDAN"
+  },
+  {
+   "code": "KEN",
+   "th": "สาธารณรัฐเคนยา",
+   "en": "REPUBLIC OF KENYA"
+  },
+  {
+   "code": "KOR",
+   "th": "สาธารณรัฐเกาหลี",
+   "en": "THE REPUBLIC OF KOREA"
+  },
+  {
+   "code": "KWT",
+   "th": "รัฐคูเวต",
+   "en": "THE STATE OF KUWAIT"
+  },
+  {
+   "code": "KIR",
+   "th": "สาธารณรัฐคิริบาส",
+   "en": "KIRIBATI"
+  },
+  {
+   "code": "PRK",
+   "th": "สาธารณรัฐประชาธิปไตยประชาชนเกาหลี",
+   "en": "THE DEMOCRALIC PEOPLE'S REPUBLIC OF KOREA"
+  },
+  {
+   "code": "KAZ",
+   "th": "สาธารณรัฐคาซัคสถาน",
+   "en": "THE REPUBLIC OF KAZAKHSTAN"
+  },
+  {
+   "code": "KGZ",
+   "th": "สาธารณรัฐคีร์กรีซ",
+   "en": "THE KYRGYS REPUBLIC OF"
+  },
+  {
+   "code": "RKS",
+   "th": "คอซอวอ",
+   "en": "REPUBLIC OF KOSOVO"
+  },
+  {
+   "code": "LAO",
+   "th": "สาธารณรัฐประชาธิปไตยประชาชนลาว",
+   "en": "THE LAO PEOPLE'S DEMOCRATIC REPUBLIC"
+  },
+  {
+   "code": "LBN",
+   "th": "สาธารณรัฐเลบานอน",
+   "en": "THE LEBANON REPUBLIC"
+  },
+  {
+   "code": "LSO",
+   "th": "ราชอาณาจักรเลโซโท",
+   "en": "THE KINGDOM OF LESOTHO"
+  },
+  {
+   "code": "LBR",
+   "th": "สาธารณรัฐไลบีเรีย",
+   "en": "REPUBLIC OF LIBERIA"
+  },
+  {
+   "code": "LBY",
+   "th": "สาธารณรัฐสังคมนิยมประชาชนอาหรับลิเบีย",
+   "en": "THE SOCIALIST PEOPLE'S LIBYAN ARAB JAMAHIRIYA"
+  },
+  {
+   "code": "LIE",
+   "th": "ราชรัฐลิกเตนสไตน์",
+   "en": "THE PRINCIPALITY OF LIECHTENSTEIN"
+  },
+  {
+   "code": "LUX",
+   "th": "ราชรัฐลักเซมเบิร์ก",
+   "en": "THE GRAND DUCHY OF LUXEMBURG"
+  },
+  {
+   "code": "LVA",
+   "th": "สาธารณรัฐลัตเวีย",
+   "en": "THE REPUBLIC OF LATVIA"
+  },
+  {
+   "code": "LTU",
+   "th": "สาธารณรัฐลิทัวเนีย",
+   "en": "THE REPUBLIC OF LITHUANIA"
+  },
+  {
+   "code": "MWI",
+   "th": "สาธารณรัฐมาลาวี",
+   "en": "THE REPUBLIC OF MALAWI"
+  },
+  {
+   "code": "MYS",
+   "th": "มาเลเซีย",
+   "en": "MALAYSIA"
+  },
+  {
+   "code": "MLI",
+   "th": "สาธารณรัฐมาลี",
+   "en": "REPUBLIC OF MALI"
+  },
+  {
+   "code": "MLT",
+   "th": "สาธารณรัฐมอลตา",
+   "en": "THE REPUBLIC OF MALTA"
+  },
+  {
+   "code": "MTQ",
+   "th": "มาร์ตินีก",
+   "en": "MARTINIQUE"
+  },
+  {
+   "code": "MRT",
+   "th": "สาธารณรัฐอิสลามมอริเตเนีย",
+   "en": "THE ISLAMIC REPUBLIC OF MAURITANIA"
+  },
+  {
+   "code": "MEX",
+   "th": "สหรัฐเม็กซิโก",
+   "en": "THE UNITED MEXICAN STATES"
+  },
+  {
+   "code": "MCO",
+   "th": "ราชรัฐโมนาโก",
+   "en": "THE PRINCIPALITY OF MONACO"
+  },
+  {
+   "code": "MNG",
+   "th": "มองโกเลีย",
+   "en": "MONGOLIA"
+  },
+  {
+   "code": "MAR",
+   "th": "ราชอาณาจักรโมร็อกโก",
+   "en": "THE KINGDOM OF MOROCCO"
+  },
+  {
+   "code": "MOZ",
+   "th": "สาธารณรัฐโมซัมบิก",
+   "en": "THE REPUBLIC OF MOZAMBIQUE"
+  },
+  {
+   "code": "FSM",
+   "th": "สหพันธรัฐไมโครนีเซีย",
+   "en": "THE FEDERATED STATES OF MICRONESIA"
+  },
+  {
+   "code": "MDV",
+   "th": "สาธารณรัฐมัลดีฟส์",
+   "en": "THE REPUBLIC OF MALDIVES"
+  },
+  {
+   "code": "MUS",
+   "th": "มอริเซียส",
+   "en": "THE REPUBLIC OF MAURITIUS"
+  },
+  {
+   "code": "MNP",
+   "th": "มาเรียนา",
+   "en": "MARIANA"
+  },
+  {
+   "code": "MDG",
+   "th": "สาธารณรัฐมาดากัสการ์",
+   "en": "THE REPUBLIC OF MADAGASCAR"
+  },
+  {
+   "code": "MKD",
+   "th": "สาธารณรัฐมาซิโดเนีย",
+   "en": "THE FORMER YUGOSLAV REPUBLIC OF MACEDONIA"
+  },
+  {
+   "code": "MDA",
+   "th": "สาธารณรัฐมอลโดวา",
+   "en": "THE REPUBLIC OF MOLDOVA"
+  },
+  {
+   "code": "TKM",
+   "th": "เติร์กเมนิสถาน",
+   "en": "TURKMENISTAN"
+  },
+  {
+   "code": "MHL",
+   "th": "สาธารณรัฐหมู่เกาะมาแชลล์",
+   "en": "THE REPUBLIC OF THE MARSHALL ISLANDS"
+  },
+  {
+   "code": "MAC",
+   "th": "มาเก๊า",
+   "en": "MACAO"
+  },
+  {
+   "code": "MNE",
+   "th": "สาธารณรัฐมอนเตเนโกร",
+   "en": "CRNA GORA MONTENEGRO"
+  },
+  {
+   "code": "MSR",
+   "th": "มอนต์เซอร์รัต",
+   "en": "MONTSERRAT"
+  },
+  {
+   "code": "MYT",
+   "th": "มายอต",
+   "en": "MAYOTTE"
+  },
+  {
+   "code": "NPL",
+   "th": "สหพันธ์สาธารณรัฐประชาธิปไตยเนปาล",
+   "en": "FEDERAL DEMOCRATIC REPUBLIC OF NEPAL"
+  },
+  {
+   "code": "N02",
+   "th": "สาธารณรัฐกินี",
+   "en": "THE REPUBLIC OF GUINEA"
+  },
+  {
+   "code": "NZL",
+   "th": "นิวซีแลนด์",
+   "en": "NEW ZEALAND"
+  },
+  {
+   "code": "NIC",
+   "th": "สาธารณรัฐนิการากัว",
+   "en": "THE REPUBLIC OF NICARAGUA"
+  },
+  {
+   "code": "NER",
+   "th": "สาธารณรัฐไนเจอร์",
+   "en": "REPUBLIC OF NIGER"
+  },
+  {
+   "code": "NGA",
+   "th": "สหพันธ์สาธารณรัฐไนจีเรีย",
+   "en": "FEDERAL REPUBLIC OF NIGERIA"
+  },
+  {
+   "code": "NOR",
+   "th": "ราชอาณาจักรนอร์เวย์",
+   "en": "THE KINGDOM OF NORWAY"
+  },
+  {
+   "code": "NRU",
+   "th": "สาธารณรัฐนาอูรู",
+   "en": "THE REPUBLIC OF NAURU"
+  },
+  {
+   "code": "NAM",
+   "th": "สาธารณรัฐนามิเบีย",
+   "en": "THE REPUBLIC OF NAMIBIA"
+  },
+  {
+   "code": "NCL",
+   "th": "หมู่เกาะนิวคาลิโตเนีย",
+   "en": "NEWCALEDONIA"
+  },
+  {
+   "code": "NFK",
+   "th": "เกาะนอร์ฟอล์ก",
+   "en": "NORFOLK ISLAND"
+  },
+  {
+   "code": "NIU",
+   "th": "นีอูเอ",
+   "en": "NIUE"
+  },
+  {
+   "code": "OMN",
+   "th": "รัฐสุลต่านโอมาน",
+   "en": "THE SULTANATE OF OMAN"
+  },
+  {
+   "code": "PAK",
+   "th": "สาธารณรัฐอิสลามปากีสถาน",
+   "en": "THE ISLAMIC REPUBLIC OF PAKISTAN"
+  },
+  {
+   "code": "PLT",
+   "th": "ปาเลสไตน์",
+   "en": "PALESTINE"
+  },
+  {
+   "code": "PAN",
+   "th": "สาธารณรัฐปานามา",
+   "en": "REPUBLIC OF PANAMA"
+  },
+  {
+   "code": "PNG",
+   "th": "ปาปัวนิวกินี",
+   "en": "PAPUA NEW GUINEA"
+  },
+  {
+   "code": "PRY",
+   "th": "สาธารณรัฐปารากวัย",
+   "en": "REPUBLIC OF PARAGUAY"
+  },
+  {
+   "code": "PER",
+   "th": "สาธารณรัฐเปรู",
+   "en": "REPUBLIC OF PERU"
+  },
+  {
+   "code": "PHL",
+   "th": "สาธารณรัฐฟิลิปปินส์",
+   "en": "THE REPUBLIC OF THE PHILIPPINES"
+  },
+  {
+   "code": "POL",
+   "th": "สาธารณรัฐโปแลนด์",
+   "en": "THE REPUBLIC OF POLAND"
+  },
+  {
+   "code": "PRT",
+   "th": "สาธารณรัฐโปรตุเกส",
+   "en": "THE PORTUGAL REPUBLIC"
+  },
+  {
+   "code": "P10",
+   "th": "ปรินซีเบิล",
+   "en": "PRINCEBLE"
+  },
+  {
+   "code": "PRI",
+   "th": "เปอร์โตริโก",
+   "en": "PUERTO RICA"
+  },
+  {
+   "code": "PLW",
+   "th": "สาธารณรัฐปาเลา",
+   "en": "THE REPUBLIC OF PALAU"
+  },
+  {
+   "code": "PCN",
+   "th": "พิตแคร์น",
+   "en": "PITCAIRN"
+  },
+  {
+   "code": "PYF",
+   "th": "เฟรนช์โปลินีเซีย",
+   "en": "FRENCH POLYNESIA"
+  },
+  {
+   "code": "QAT",
+   "th": "รัฐกาตาร์",
+   "en": "THE STATE OF QATAR"
+  },
+  {
+   "code": "REU",
+   "th": "เรอุนยอง",
+   "en": "REUNION ISLAND"
+  },
+  {
+   "code": "ROU",
+   "th": "โรมาเนีย",
+   "en": "ROMANIA"
+  },
+  {
+   "code": "RUS",
+   "th": "สหพันธรัฐรัสเซีย",
+   "en": "THE RUSSIAN FEDERATION"
+  },
+  {
+   "code": "RWA",
+   "th": "สาธารณรัฐรวันดา",
+   "en": "THE RWANDESE REPUBLIC"
+  },
+  {
+   "code": "SLB",
+   "th": "หมู่เกาะโซโลมอน",
+   "en": "SOLOMON ISLANDS"
+  },
+  {
+   "code": "SAU",
+   "th": "ราชอาณาจักรซาอุดีอาระเบีย",
+   "en": "THE KINGDOM OF SAUDI ARABIA"
+  },
+  {
+   "code": "STP",
+   "th": "สาธารณรัฐประชาธิประไตยเซาโตเมและปรินซิเป",
+   "en": "THE DEMOCRATIC  REPUBLIC OF SAO TOME AND PRINCIPE"
+  },
+  {
+   "code": "SCT",
+   "th": "สก็อตแลนด์",
+   "en": "SCOTLAND"
+  },
+  {
+   "code": "SEN",
+   "th": "สาธารณรัฐเซเนกัล",
+   "en": "REPUBLIC OF SENEGAL"
+  },
+  {
+   "code": "SLE",
+   "th": "สาธารณรัฐเชียร์ราลีโอน",
+   "en": "REPUBLIC OF SIERRA LEONE"
+  },
+  {
+   "code": "SGP",
+   "th": "สาธารณรัฐสิงคโปร์",
+   "en": "THE REPUBLIC OF SINGAPORE"
+  },
+  {
+   "code": "SOM",
+   "th": "สาธารณรัฐประชาธิปไตยโซมาลี",
+   "en": "THE SOMALI DEMOCRATIC  REPUBLIC"
+  },
+  {
+   "code": "ZAF",
+   "th": "สาธารณรัฐแอฟริกาใต้",
+   "en": "THE REPUBLIC OF SOUTH AFRICA"
+  },
+  {
+   "code": "ESP",
+   "th": "ราชอาณาจักรสเปน",
+   "en": "THE KINGDOM OF SPAIN"
+  },
+  {
+   "code": "S14",
+   "th": "สเปนิชซาฮารา",
+   "en": "SPANISH SAHARA"
+  },
+  {
+   "code": "SDN",
+   "th": "สาธารณรัฐซูดาน",
+   "en": "REPUBLIC OF THE SUDAN"
+  },
+  {
+   "code": "SUR",
+   "th": "สาธารณรัฐซูรินาเม",
+   "en": "REPUBLIC OF SURINAME"
+  },
+  {
+   "code": "SWZ",
+   "th": "ราชอาณาจักรสวาซิแลนด์",
+   "en": "THE KINGDOM OF SWAZILAND"
+  },
+  {
+   "code": "SWE",
+   "th": "ราชอาณาจักรสวีเดน",
+   "en": "THE KINGDOM OF SWEDEN"
+  },
+  {
+   "code": "CHE",
+   "th": "สมาพันธรัฐสวิส",
+   "en": "THE SWISS CONFEDERATION"
+  },
+  {
+   "code": "SYR",
+   "th": "สาธารณรัฐอาหรับซีเรีย",
+   "en": "THE SYRIAN ARAB REPUBLIC"
+  },
+  {
+   "code": "XXA",
+   "th": "ไม่มีสัญชาติ",
+   "en": "STATELESS"
+  },
+  {
+   "code": "WSM",
+   "th": "รัฐเอกราชซามัว",
+   "en": "THE REPUBLIC OF SAMOA"
+  },
+  {
+   "code": "SYC",
+   "th": "สาธารณรัฐเซเชลส์",
+   "en": "THE REPUBLIC OF SEYCHELLES"
+  },
+  {
+   "code": "SMR",
+   "th": "สาธารณรัฐซานมารีโน",
+   "en": "THE REPUBLIC OF SAN MARINO"
+  },
+  {
+   "code": "LCA",
+   "th": "เซนต์ลูเซีย",
+   "en": "SAINT LUCIA"
+  },
+  {
+   "code": "KNA",
+   "th": "เกาะเซนต์คริสโตเฟอร์",
+   "en": "ST.CHRISTOPHER/NEVIS"
+  },
+  {
+   "code": "VCT",
+   "th": "เซนต์วินเซนต์และเกรนาดีนส์",
+   "en": "SAINT VINCENT AND THE GRENADINES"
+  },
+  {
+   "code": "SVN",
+   "th": "สาธารณรัฐสโลเวเนีย",
+   "en": "THE REPUBLIC OF SLOVENIA"
+  },
+  {
+   "code": "SVK",
+   "th": "สาธารณรัฐสโลวัก",
+   "en": "THE SLOVAK REPUBLIC"
+  },
+  {
+   "code": "SGS",
+   "th": "เกาะเซาท์จอร์เจียและหมู่เกาะเซาท์แซนด์วิช",
+   "en": "SOUTH GEORGIA AND THE SOUTH SANDWICH ISLANDS"
+  },
+  {
+   "code": "SHN",
+   "th": "เซนต์เฮเลนา",
+   "en": "ST. HELENA"
+  },
+  {
+   "code": "SJM",
+   "th": "สฟาลบาร์และหมู่เกาะยานไมเอน",
+   "en": "SVALBARD AND JAN MAYEN ISLANDS"
+  },
+  {
+   "code": "SPM",
+   "th": "เซนต์ปิแอร์และมิคิวลอน",
+   "en": "ST. PEIRRE AND MIQUELON"
+  },
+  {
+   "code": "SRB",
+   "th": "เซอร์เบีย",
+   "en": "SERBIA"
+  },
+  {
+   "code": "SSD",
+   "th": "สาธารณรัฐเซาท์ซูดาน",
+   "en": "REPUBLIC OF SOUTH SUDAN"
+  },
+  {
+   "code": "TWN",
+   "th": "ไต้หวัน",
+   "en": "TAIWAN"
+  },
+  {
+   "code": "TZA",
+   "th": "สหสาธารณรัฐแทนซาเนีย",
+   "en": "THE UNITED REPUBLIC OF TANZANIA"
+  },
+  {
+   "code": "THA",
+   "th": "ราชอาณาจักรไทย",
+   "en": "THE KINGDOM OF THAILAND"
+  },
+  {
+   "code": "TGO",
+   "th": "สาธารณรัฐโตโก",
+   "en": "REPUBLIC OF TOGO"
+  },
+  {
+   "code": "TTO",
+   "th": "สาธารณรัฐตรินิแดดและโตเบโก",
+   "en": "REPUBLIC OF TRINIDAD AND TOBAGO"
+  },
+  {
+   "code": "TUN",
+   "th": "สาธารณรัฐตูนีเซีย",
+   "en": "THE REPUBLIC OF TUNISIA"
+  },
+  {
+   "code": "TUR",
+   "th": "สาธารณรัฐตุรกี",
+   "en": "THE REPUBLIC OF TURKEY"
+  },
+  {
+   "code": "TON",
+   "th": "ราขอาณาจักรตองกา",
+   "en": "THE KINGDOM OF TONGA"
+  },
+  {
+   "code": "T10",
+   "th": "ทรัสต์แปซิฟิค",
+   "en": "TRUST PACIFIC"
+  },
+  {
+   "code": "TUV",
+   "th": "ตูวาลู",
+   "en": "TUVALU"
+  },
+  {
+   "code": "TJK",
+   "th": "สาธารณรัฐทาจิกิสถาน",
+   "en": "THE REPUBLIC OF TAJIKISTAN"
+  },
+  {
+   "code": "TCA",
+   "th": "หมู่เกาะเติกส์และหมู่เกาะเคคอส",
+   "en": "TURKS AND CAICOS ISLANDS"
+  },
+  {
+   "code": "TKL",
+   "th": "โตเกเลา",
+   "en": "TOKELAU"
+  },
+  {
+   "code": "TLS",
+   "th": "ติมอร์ เลสเต้",
+   "en": "TIMOR-LESTE"
+  },
+  {
+   "code": "UGA",
+   "th": "สาธารณรัฐยูกันดา",
+   "en": "REPUBLIC OF UGANDA"
+  },
+  {
+   "code": "URY",
+   "th": "อุรุกวัย",
+   "en": "THE EASTERN REPUBLIC OF URUGUAY"
+  },
+  {
+   "code": "ARE",
+   "th": "สหรัฐอาหรับเอมิเรตส์",
+   "en": "THE UNITED ARAB EMIRATES"
+  },
+  {
+   "code": "XXX",
+   "th": "ไม่ทราบ",
+   "en": "UNKNOWN"
+  },
+  {
+   "code": "UKR",
+   "th": "ยูเครน",
+   "en": "UKRAINE"
+  },
+  {
+   "code": "UZB",
+   "th": "สาธารณรัฐอุซเบกิสถาน",
+   "en": "THE REPUBLIC OF UZBEKISTANS"
+  },
+  {
+   "code": "UNO",
+   "th": "องค์การสหประชาชาติ",
+   "en": "UNITED NATION"
+  },
+  {
+   "code": "UMI",
+   "th": "ยูเอส ไมเนอร์ เอ๊าไลน์นิ่ง ไอร์แลนด์",
+   "en": "UNITED STATES MINOR OUTLYING ISLANDS"
+  },
+  {
+   "code": "UNA",
+   "th": "ยูเอ็น",
+   "en": "SPECIALIZED AGENCY OF UNITED NATIONS"
+  },
+  {
+   "code": "UTO",
+   "th": "ยูโทเปีย",
+   "en": "UTOPIA"
+  },
+  {
+   "code": "VAT",
+   "th": "นครรัฐวาติกัน",
+   "en": "VATICAN CITY STATE THE HOLY SEE"
+  },
+  {
+   "code": "VEN",
+   "th": "สาธารณรัฐโบลีวาร์แห่งเวเนซุเอลา",
+   "en": "BOLIVARIAN REPUBLIC OF VENEZUELA"
+  },
+  {
+   "code": "VNM",
+   "th": "สาธารณรัฐสังคมนิยมเวียดนาม",
+   "en": "THE SOCIALIST REPUBLIC OF VIETNAM"
+  },
+  {
+   "code": "VUT",
+   "th": "สาธารณรัฐวานูอาทู",
+   "en": "THE REPUBLIC OF VANUATU"
+  },
+  {
+   "code": "VIS",
+   "th": "หมู่เกาะเวอร์จิน",
+   "en": "VIRGIN ISLANDS"
+  },
+  {
+   "code": "WLF",
+   "th": "หมู่เกาะวาลลิสและหมู่เกาะฟุตูนา",
+   "en": "WALLIS AND FUTUNA ISLANDS"
+  },
+  {
+   "code": "XXB",
+   "th": "ผู้อพยพ (1951 CONVENTION)",
+   "en": "REFUGEE (1951 CONVENTION)"
+  },
+  {
+   "code": "XXC",
+   "th": "ผู้อพยพ (อื่นๆ)",
+   "en": "REFUGEE (OTHER)"
+  },
+  {
+   "code": "YEM",
+   "th": "สาธารณรัฐเยเมน",
+   "en": "THE REPUBLIC OF YEMEN"
+  },
+  {
+   "code": "YUG",
+   "th": "สหพันธ์สาธารณรัฐยูโกสลาเวีย",
+   "en": "THE FEDERAL REPUBLIC OF YOGOSLAVIA"
+  },
+  {
+   "code": "Y03",
+   "th": "เยเมนเหนือ",
+   "en": "YEMEN REP."
+  },
+  {
+   "code": "ZMB",
+   "th": "สาธารณรัฐแซมเบีย",
+   "en": "THE REPUBLIC OF ZAMBIA"
+  },
+  {
+   "code": "ZAR",
+   "th": "ซาอีร์",
+   "en": "ZAIRE"
+  },
+  {
+   "code": "ZIM",
+   "th": "สาธารณรัฐซิมบับเว",
+   "en": "THE REPUBLIC OF ZIMBABWE"
+  },
+  {
+   "code": "ZWE",
+   "th": "สาธารณรัฐซิมบับเว (ZWE)",
+   "en": "THE REPUBLIC OF ZIMBABWE (ZWE)"
+  }
+ ]
+}
