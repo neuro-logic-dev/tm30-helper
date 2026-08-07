@@ -99,6 +99,26 @@ function normalizeRow(row, index) {
     if (typeof row.return_url === 'string') out.return_url = row.return_url;
 
     /**
+     * DISPLAY-ONLY, and deliberately so.
+     *
+     * Both have been on the wire since the backend added them (`Tm30WorklistItem`) and the
+     * emitter forwards them (`src/lib/tm30.ts`), but this allowlist never copied them across, so
+     * every row reached the pane without either field. Nothing broke — the renderer guards on
+     * both — which is exactly why it went unnoticed: the pane simply showed less than it had.
+     *
+     *  - `checkout` — the stay's end. The urgency bucket is check-IN's alone (014 §7.1 Q2);
+     *    nothing downstream may derive a dot, a rank or a bucket from this one.
+     *  - `internal_id` — `contract.internal_id`, e.g. `C100-04082026-001`. The reference humans
+     *    use for the stay, so a filing can be matched to a booking without translating between
+     *    two identifier systems.
+     *
+     * Absent keys stay absent (the `account` omission style): a backend older than these fields
+     * is not an error, and the row renders without them.
+     */
+    if (typeof row.checkout === 'string') out.checkout = row.checkout;
+    if (typeof row.internal_id === 'string') out.internal_id = row.internal_id;
+
+    /**
      * 🔴 The daily case (014 §7.9). An absent `account` is a REAL, EXPECTED state — the row is
      * kept and the key is simply omitted. An empty-but-present `{login:'',pass:''}` is normalised
      * to the same absent state rather than propagated: that always-present-never-usable shape is

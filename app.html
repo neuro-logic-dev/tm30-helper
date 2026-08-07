@@ -46,30 +46,44 @@
         hence `state.villaSession` is keyed by villa, and 4d must not re-key it per group.
     -->
     <style>
-      /* Tokens lifted verbatim from the signed-off mockup so 4d/4e inherit the same palette. */
+      /*
+       * Palette re-based onto mo-reservation-fe so the Helper and the dashboard read as one
+       * product. Three things changed, and only these:
+       *
+       *  • The neutral ramp is Tailwind `slate`, the same one the web app settled on. The old
+       *    ramp was a bespoke blue-grey (#0f1519 / #5a6673 / #d3dae2) — close enough to slate to
+       *    look like a slightly dirty version of it when the two windows sit side by side.
+       *  • The status colours are the web app's badge severities, hex for hex, so "overdue" is
+       *    the same red here as on the reservation row that sent you here.
+       *  • The accent is MO gold — what the dashboard uses to mark the thing you are on. It is
+       *    a MARK, not a fill: gold under white text fails contrast, so solid buttons take
+       *    `--primary` and gold text on a gold wash takes the darker `--accent-ink`.
+       *
+       * The dark-mode block is gone. The web app ships light only, and "matches the site" and
+       * "follows the OS" cannot both be true.
+       */
       :root {
-        --paper: #edf0f3; --surface: #ffffff; --surface-2: #f6f8fa;
-        --ink: #0f1519; --muted: #5a6673; --faint: #8794a2;
-        --line: #d3dae2; --line-soft: #e2e7ed;
-        --accent: #2a5d8f; --accent-soft: #e4edf6;
-        --due: #8a5a0e; --due-bg: #fbefd9;
-        --overdue: #9c2e26; --overdue-bg: #fbe3e0;
-        --ok: #1e6047; --ok-bg: #ddf0e7;
-        --blocked: #616d7a; --blocked-bg: #e7ebef;
+        --paper: #f8fafc; --surface: #ffffff; --surface-2: #f8fafc;
+        --ink: #0f172a; --muted: #64748b; --faint: #94a3b8;
+        --line: #e2e8f0; --line-soft: #f1f5f9;
+
+        --accent: #bd9c69; --accent-soft: #faf6ef; --accent-ink: #8a6d3f;
+        --primary: #1e2530;
+
+        --due: #92400e; --due-bg: #fffbeb;
+        --overdue: #b91c1c; --overdue-bg: #fef2f2;
+        --ok: #166534; --ok-bg: #f0fdf4;
+        --blocked: #475569; --blocked-bg: #f1f5f9;
+
+        /*
+         * The system stack, deliberately. The web app's Inter and JetBrains Mono are not
+         * shipped with this app, so naming them here bought nothing: every operator machine
+         * fell through to the next entry anyway, and the declaration only made the stylesheet
+         * claim a match with the dashboard that the pixels never delivered. Bundling both faces
+         * to close a gap this size is not worth ~300 KB in an auto-updating Electron build.
+         */
         --ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
         --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #10151a; --surface: #171e26; --surface-2: #1c242e;
-          --ink: #e4eaf0; --muted: #94a2b1; --faint: #6f7e8e;
-          --line: #29323d; --line-soft: #222a34;
-          --accent: #74a9dc; --accent-soft: #1b2a3a;
-          --due: #d9a441; --due-bg: #33280f;
-          --overdue: #e8776c; --overdue-bg: #3a1f1c;
-          --ok: #5fb98c; --ok-bg: #12301f;
-          --blocked: #8c9aa8; --blocked-bg: #232b34;
-        }
       }
 
       * { box-sizing: border-box; }
@@ -117,48 +131,48 @@
       .list {
         flex: 1;
         overflow-y: auto;
-        padding: 8px;
+        padding: 4px 8px 12px;
         display: flex;
         flex-direction: column;
-        gap: 7px;
+        gap: 0;
         min-height: 0;
       }
 
       /*
-        🔴 `.list`, `.vg-body` and `.group-body` are all COLUMN FLEX containers, so their
-        children default to `flex-shrink: 1` and get SQUASHED once the worklist is taller than
-        the pane — rows lose their action bar and whole rows vanish behind the next group,
-        instead of the list scrolling. Observed while building 4d with a 9-row fixture. Every
+        🔴 `.list` is a COLUMN FLEX container, so its children default to `flex-shrink: 1` and
+        get SQUASHED once the worklist is taller than the pane — rows lose their action bar and
+        whole rows vanish below the fold, instead of the list scrolling. Observed while building
+        4d with a 9-row fixture, and it applies to a flat list exactly as it did to groups. Every
         list child is therefore pinned to its natural height; `.list`'s `overflow-y: auto` then
         does what it was always meant to.
       */
-      .list > *,
-      .vg-body > *,
-      .group-body > * { flex: 0 0 auto; }
+      .list > * { flex: 0 0 auto; }
 
       /* ── worklist row (mockup H2 — row art lifted verbatim) ──────────────────────────── */
+      /*
+        A list item, not a card. This was an outlined, rounded box nested inside another
+        outlined, rounded box (the villa group) whose buttons were themselves outlined boxes —
+        three levels of framing inside a 360px pane. What survives is the one mark that carries
+        meaning: the coloured edge bar. Rows are told apart by a hairline, the way the web app's
+        agenda tells its bookings apart.
+      */
       .row {
-        border: 1px solid var(--line);
         border-left: 3px solid var(--blocked);
-        border-radius: 8px;
-        padding: 10px 11px;
+        border-bottom: 1px solid var(--line-soft);
+        padding: 9px 10px 9px 11px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        background: var(--surface);
+        gap: 7px;
         position: relative;
         cursor: pointer;
-        transition: 0.15s;
+        transition: background 0.12s;
         text-align: left;
         font: inherit;
         color: inherit;
       }
-      .row:hover { box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.25); }
-      .row.sel {
-        background: var(--accent-soft);
-        border-color: var(--accent);
-        box-shadow: inset 0 0 0 1px var(--accent);
-      }
+      .row:last-child { border-bottom: 0; }
+      .row:hover { background: rgba(15, 23, 42, 0.03); }
+      .row.sel { background: var(--accent-soft); }
       /*
         T3-03: the deep link's FOCUSED filing — the one the operator launched from. An outer
         ring, distinct from `.sel`'s inset (selection is per-VILLA and moves with clicks; the
@@ -172,32 +186,30 @@
       .row.s-block { border-left-color: var(--blocked); opacity: 0.75; }
       .row.s-await { border-left-color: var(--ok); border-left-style: dashed; }
 
-      .row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-      .villa { font-size: 13.5px; font-weight: 640; letter-spacing: -0.01em; line-height: 1.3; }
-      .when {
-        font-size: 11.5px;
-        color: var(--muted);
-        font-family: var(--mono);
-        font-variant-numeric: tabular-nums;
-        margin-top: 3px;
-      }
+      .row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      /*
+        The check-in date IS the row's name now — the villa is printed once, on the group header
+        that owns these rows, instead of once per row underneath it. Not monospaced: a date is
+        read, not aligned into a column, and mono here made it the only typewriter text on a
+        pane of proportional type.
+      */
+      .when { font-size: 12px; color: var(--ink); display: flex; align-items: baseline; gap: 5px; margin-top: 1px; }
+      .when-sep { color: var(--faint); }
+      .when-out { color: var(--muted); }
       .when .due { color: var(--due); font-weight: 600; }
-      .when .over { color: var(--overdue); font-weight: 700; }
 
       .badge {
         flex: none;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        padding: 3px 7px;
-        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 4px;
         white-space: nowrap;
         background: var(--blocked-bg);
         color: var(--blocked);
       }
       .badge.b-need { background: var(--due-bg); color: var(--due); }
-      .badge.b-dl { background: var(--accent-soft); color: var(--accent); }
+      .badge.b-dl { background: var(--accent-soft); color: var(--accent-ink); }
       .badge.b-sub { background: var(--ok-bg); color: var(--ok); }
       .badge.b-over { background: var(--overdue-bg); color: var(--overdue); }
       .badge.b-block { background: var(--blocked-bg); color: var(--blocked); }
@@ -209,147 +221,149 @@
         values are a guard, not the mechanism. Slots are always PRESENT: they disable, they
         never disappear, so nothing shifts position as a row changes state (mockup H2).
       */
-      .acts { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; order: 2; }
+      /* One line, never two: the folder button used to wrap onto a row of its own and sit
+         there stranded under a run of empty space. */
+      /*
+        One line, in priority order, and only the primary carries a word.
+        Six labelled controls do not fit 360px — the last of them lost its text and then its
+        right edge. What is left is the action that finishes the filing, written out, and the
+        one control that supports it, as its icon and named by `title`. The session chip that
+        used to close this row now lives in the portal pane (`.sessionbar`): it is a
+        precondition, it is per-VILLA, and repeating it on every filing that villa owns said
+        the same thing three times.
+      */
+      .acts { display: flex; gap: 5px; flex-wrap: nowrap; align-items: center; order: 2; }
       .act-status { order: 1; margin-right: auto; }
       .act-insert { order: 2; }
-      .act-sheet { order: 3; }
-      .act-folder { order: 4; }
+      .act-folder { order: 3; }
+
+      /* Villa and date on one line: the name leads, the date qualifies it. */
+      .row-id { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+      .villa { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+      .ref { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
+      /*
+        Priority is now visible in the weight, not just the order. The primary action was an
+        outlined button identical to the two secondaries beside it, so nothing said which one
+        finishes the job; the secondaries carried the same frame as the thing they support.
+      */
+      /*
+        Three weights, and every one of them still looks like a button.
+        The previous pass made all of them ghosts — no border, no fill — so the action that
+        finishes a filing was indistinguishable from the text beside it, and on a row whose
+        villa is not logged in it lost even its fill and read as disabled.
+      */
       .btn {
         font: inherit;
         font-size: 11.5px;
-        font-weight: 550;
-        padding: 4px 9px;
+        font-weight: 500;
+        padding: 5px 9px;
         border-radius: 6px;
         border: 1px solid var(--line);
-        background: var(--surface-2);
+        background: var(--surface);
         color: var(--ink);
         cursor: pointer;
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        transition: 0.15s;
+        gap: 5px;
+        white-space: nowrap;
+        transition: 0.12s;
       }
-      .btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+      .btn svg { flex: none; opacity: 0.75; }
+      .btn:hover:not([disabled]) { border-color: var(--faint); background: var(--surface-2); }
       .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-      .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      .btn.primary:hover:not([disabled]) { filter: brightness(1.08); color: #fff; }
-      .btn.done { background: var(--ok-bg); border-color: transparent; color: var(--ok); cursor: default; }
-      .rowmsg { font-size: 11px; color: var(--muted); font-style: italic; order: 1; }
 
-      /* ── postponed (24h+) group + the "within 24h" divider (mockup H4) ───────────────── */
-      .group { border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
-      .group-h {
-        width: 100%;
-        font: inherit;
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--muted);
-        background: none;
-        border: 0;
-        cursor: pointer;
-        padding: 9px 11px;
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        text-align: left;
+      /* The one that completes the filing. Filled — nothing else on the row is. */
+      .btn.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+        font-weight: 550;
       }
-      .group-h .chev { transition: transform 0.18s; display: inline-block; font-size: 9px; color: var(--faint); }
-      .group.open .chev { transform: rotate(90deg); }
-      .group-h .sub { color: var(--faint); font-weight: 500; }
-      .group-body { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 7px; }
-      .divider {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 3px;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: var(--faint);
+      .btn.primary svg { opacity: 1; }
+      .btn.primary:hover:not([disabled]) { filter: brightness(1.15); color: #fff; }
+      /*
+        Not yet inviting, still obviously pressable: the villa has no portal session, so filing
+        has not happened yet. It used to drop to a bare ghost here, which read as broken.
+      */
+      .btn.primary.locked {
+        background: var(--surface);
+        border-color: var(--ink);
+        color: var(--ink);
       }
-      .divider::after { content: ''; flex: 1; height: 1px; background: var(--line-soft); }
+      .btn.done { background: var(--ok-bg); border-color: transparent; color: var(--ok); cursor: default; }
+      .btn.icon-only { padding: 5px; }
+      /* Not italic — it was the only slanted type here, and italic in a dense list reads as an
+         error rather than as an explanation. */
+      .rowmsg { font-size: 11px; color: var(--muted); order: 1; }
 
       /*
-        ── villa group (mockup H4, 014 §7.2) ───────────────────────────────────────────────
-        The villa — not the row — is the session unit. The header owns the login; the body owns
-        the rows that login unlocks. The inset rail down the body is that ownership, DRAWN: it
-        runs from the header through every row, so "one solve covers all of these" is visible.
+        ── session bar (Q2) — the active villa's portal session, in the portal pane ────────
+        Carries the three things the villa group header used to: WHO is logged in, WHETHER the
+        session is open, and the way to start it over. The colour language is the group's,
+        unchanged — amber waiting, green open, grey manual — so nothing has to be re-learned.
+
+        The left border is the same state rail `.vgroup-h` drew, kept because it is the one
+        mark readable without reading: the pane's top edge changes colour when a captcha is
+        solved.
       */
-      .vgroup { border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
-      .vgroup-h {
+      .sessionbar {
         display: flex;
         align-items: center;
-        gap: 9px;
-        padding: 8px 11px;
-        background: var(--surface);
-        border-bottom: 1px solid var(--line-soft);
+        gap: 10px;
+        padding: 7px 12px;
+        background: var(--surface-2);
+        border-bottom: 1px solid var(--line);
         border-left: 3px solid var(--due);
-        cursor: pointer;
-        width: 100%;
-        font: inherit;
-        color: inherit;
-        text-align: left;
+        flex: 0 0 auto;
       }
-      .vgroup.open-session .vgroup-h { border-left-color: var(--ok); }
-      .vgroup.no-acct .vgroup-h { border-left-color: var(--blocked); }
-      .vgroup.sel .vgroup-h { background: var(--accent-soft); }
-      .vg-id { min-width: 0; flex: 1; }
-      .vg-name { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
-      .vg-acct {
+      .sessionbar.open-session { border-left-color: var(--ok); }
+      .sessionbar.no-acct { border-left-color: var(--blocked); }
+      .sb-id { min-width: 0; flex: 1; }
+      .sb-villa { font-size: 12.5px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
+      .sb-acct {
         font-size: 10.5px;
         font-family: var(--mono);
         color: var(--muted);
-        margin-top: 2px;
+        margin-top: 1px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .vg-acct.none { font-family: var(--ui); font-style: italic; color: var(--faint); }
-      .vg-pill {
+      .sb-acct.none { font-family: var(--ui); color: var(--faint); }
+      .sb-pill {
         flex: none;
-        font-size: 9.5px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        padding: 3px 7px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 3px 8px;
         border-radius: 5px;
         white-space: nowrap;
       }
-      .vg-pill.locked { background: var(--due-bg); color: var(--due); }
-      .vg-pill.open { background: var(--ok-bg); color: var(--ok); }
-      .vg-pill.manual { background: var(--blocked-bg); color: var(--blocked); }
-      /*
-        4g: ↻ fresh login — the per-villa session reset, in the header ROW. It sits BESIDE the
-        header content rather than inside a <button>, because the header stopped being one (HTML
-        forbids button-in-button; see `renderVillaGroup`). On EVERY group, creds or not —
-        a cred-less villa's operator restarts a MANUAL login with the same click.
-      */
-      .vg-fresh {
+      .sb-pill svg { flex: none; }
+      .sb-pill.locked { background: var(--due-bg); color: var(--due); }
+      .sb-pill.open { background: var(--ok-bg); color: var(--ok); }
+      .sb-pill.manual { background: var(--blocked-bg); color: var(--blocked); }
+      .sb-fresh {
         flex: none;
         font: inherit;
-        font-size: 10px;
-        font-weight: 600;
-        padding: 2px 7px;
-        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 4px 9px;
+        border-radius: 6px;
         border: 1px solid var(--line);
-        background: none;
+        background: var(--surface);
         color: var(--muted);
         cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
         white-space: nowrap;
-        transition: 0.15s;
+        transition: 0.12s;
       }
-      .vg-fresh:hover { border-color: var(--accent); color: var(--accent); }
-      .vg-body {
-        padding: 7px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        box-shadow: inset 3px 0 0 var(--due);
-      }
-      .vgroup.open-session .vg-body { box-shadow: inset 3px 0 0 var(--ok); }
-      .vgroup.no-acct .vg-body { box-shadow: inset 3px 0 0 var(--blocked); }
-      .vgroup.finished .vg-body { box-shadow: inset 3px 0 0 var(--ok); }
+      .sb-fresh svg { flex: none; opacity: 0.75; }
+      .sb-fresh:hover { border-color: var(--faint); color: var(--ink); }
 
       .st-ok { color: var(--ok); font-weight: 600; }
 
@@ -497,6 +511,26 @@
           <button id="btn-reload" title="Reload" disabled>⟳</button>
           <span class="urlbox" id="urlbox"></span>
         </div>
+        <!--
+          ── the ACTIVE villa's portal session (Q2) ────────────────────────────────────────
+          The session moved here when the worklist went flat. It used to live in the villa
+          group header, and when grouping was replaced by a priority sort that header — and
+          with it the session chip and `↻ fresh login` — had nowhere left to render, leaving
+          `freshLogin()` reachable only from the console.
+
+          This is the better home regardless: a portal session is a property of the PANE, not
+          of the queue. There is exactly one active villa, so the state is stated once instead
+          of repeating on every filing that villa owns, and the reset sits beside the thing it
+          resets. Hidden entirely until a villa is selected — an empty pane has no session.
+        -->
+        <div class="sessionbar hidden" id="sessionbar">
+          <div class="sb-id">
+            <div class="sb-villa" id="sb-villa"></div>
+            <div class="sb-acct" id="sb-acct"></div>
+          </div>
+          <span class="sb-pill" id="sb-pill"></span>
+          <button type="button" class="sb-fresh" id="sb-fresh"></button>
+        </div>
         <div class="viewport" id="viewport">
           <div class="loading-bar" id="loading-bar"></div>
           <!--
@@ -587,16 +621,12 @@
          * sent to a backend status"). `{ downloadPath, downloadError, submitted }`.
          */
         rowLocal: Object.create(null),
-        /** The postponed group is COLLAPSED by default (014 §2.5). Survives a re-render. */
-        postponedOpen: false,
         /**
          * 🔴 The bucket boundary, captured ONCE. 014 §2.1 / §7.1 Q2 / 007 GAP-6: NO countdown,
          * NO live timer, ever. Every re-render (download, mark-submitted) reuses this instant,
          * so a row can never migrate buckets while the operator is looking at it.
          */
         renderNow: 0,
-        /** Filled by `renderList`, read by `renderCount`. */
-        buckets: null,
         /** Transient status-line note, e.g. `sheet downloaded ✓`. */
         statusNote: null,
 
@@ -641,6 +671,11 @@
         back: document.getElementById('btn-back'),
         fwd: document.getElementById('btn-fwd'),
         reload: document.getElementById('btn-reload'),
+        sessionBar: document.getElementById('sessionbar'),
+        sbVilla: document.getElementById('sb-villa'),
+        sbAcct: document.getElementById('sb-acct'),
+        sbPill: document.getElementById('sb-pill'),
+        sbFresh: document.getElementById('sb-fresh'),
       };
 
       // ── selection plumbing ─────────────────────────────────────────────────────────────
@@ -668,11 +703,65 @@
        * password themselves, and the Helper has no way to observe that. Gating anything on a
        * session a cred-less villa can never acquire would kill the exact rows that ship first.
        *
-       * This matches `renderVillaGroup`'s class precedence exactly — `no-acct` BEFORE `locked` —
-       * so the group art and the row affordances can never disagree.
+       * This matches `renderSessionBar`'s class precedence exactly — `no-acct` BEFORE `locked` —
+       * so the session bar and the row affordances can never disagree.
        */
       function isLocked(villa) {
         return !!accountFor(villa) && !state.villaSession[villa];
+      }
+
+      /**
+       * Q2 — paint the active villa's portal session into the portal pane.
+       *
+       * The three-way state and its precedence are the villa group header's, unchanged:
+       * `no-acct` BEFORE `locked`, because a cred-less villa is never locked — it is a MANUAL
+       * login, the normal launch state, and the Helper cannot observe when the human finishes
+       * it. Keeping the precedence identical is what stops the bar and `isLocked` — which still
+       * gates the row's primary action — from ever disagreeing.
+       *
+       * No villa selected → the bar is hidden outright rather than emptied: an unselected pane
+       * has no session to describe, and a blank bar would imply it had one.
+       */
+      function renderSessionBar() {
+        var villa = state.activeVilla;
+        if (!villa) {
+          el.sessionBar.classList.add('hidden');
+          return;
+        }
+        el.sessionBar.classList.remove('hidden');
+
+        var account = accountFor(villa);
+        var session = state.villaSession[villa] || null;
+
+        el.sessionBar.classList.toggle('no-acct', !account);
+        el.sessionBar.classList.toggle('open-session', !!account && !!session);
+
+        el.sbVilla.textContent = villa; // one name, never split (009 §10)
+
+        if (account) {
+          el.sbAcct.className = 'sb-acct';
+          el.sbAcct.textContent = account.login;
+        } else {
+          // Calm and first-class: on day one this is most villas, not a fault (014 §7.9).
+          el.sbAcct.className = 'sb-acct none';
+          el.sbAcct.textContent = 'no portal credentials yet';
+        }
+
+        if (!account) {
+          el.sbPill.className = 'sb-pill manual';
+          setLabel(el.sbPill, null, 'manual login');
+        } else if (session) {
+          el.sbPill.className = 'sb-pill open';
+          setLabel(el.sbPill, 'check', 'session open');
+        } else {
+          el.sbPill.className = 'sb-pill locked';
+          setLabel(el.sbPill, 'lock', 'log in');
+        }
+
+        setLabel(el.sbFresh, 'refresh', 'Fresh login');
+        el.sbFresh.title = account
+          ? "Clear this villa's portal session and start the login over"
+          : "Clear this villa's portal session and start the manual login over";
       }
 
       function setActiveVilla(villa) {
@@ -689,6 +778,7 @@
         syncAllInsertButtons();
 
         renderStatusLine();
+        renderSessionBar(); // Q2: the pane's session follows the selection that owns it
         document.title = villa ? 'TM30 Helper — ' + villa : 'TM30 Helper';
 
         var account = villa ? accountFor(villa) : null;
@@ -740,6 +830,41 @@
        * `row.dot`, which the server computed; `downloaded` is Helper-local and never leaves the
        * process (mockup H2 GAP-B). Nothing here re-derives urgency.
        */
+      /**
+       * Icons, inline.
+       *
+       * The pane used emoji — 🔒 ⇥ ⬇ 📁 ↻ ✓ ▶ — whose weight, size and colour come from
+       * whichever emoji font the OS supplies, so a control rendered heavier on a Mac than on
+       * Windows and none of them could take their button's colour. These are lucide paths on
+       * the same 24px grid the web app uses, drawn in `currentColor`. This file ships with no
+       * dependencies, so they are strings.
+       */
+      var ICON_PATHS = {
+        check: '<polyline points="20 6 9 17 4 12"/>',
+        download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+        insert: '<polyline points="3 12 11 12"/><polyline points="8 8 12 12 8 16"/><line x1="18" y1="4" x2="18" y2="20"/>',
+        folder: '<path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z"/>',
+        refresh: '<polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>',
+        lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+        chevron: '<polyline points="9 18 15 12 9 6"/>',
+        external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+      };
+
+      /** An `<svg>` string for one icon, sized in px and inheriting the caller's colour. */
+      function icon(name, size) {
+        return (
+          '<svg width="' + (size || 13) + '" height="' + (size || 13) + '" viewBox="0 0 24 24" ' +
+          'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+          'stroke-linejoin="round" aria-hidden="true">' + ICON_PATHS[name] + '</svg>'
+        );
+      }
+
+      /** A button's label: icon + text, both inheriting the button's colour. */
+      function setLabel(btn, name, text) {
+        btn.innerHTML = name ? icon(name) : '';
+        if (text) btn.appendChild(document.createTextNode(text));
+      }
+
       var STATE_ART = {
         need:       { row: 's-need',  badge: 'b-need',  label: 'need upload' },
         downloaded: { row: 's-dl',    badge: 'b-dl',    label: 'downloaded' },
@@ -748,6 +873,37 @@
         overdue:    { row: 's-over',  badge: 'b-over',  label: 'overdue' },
         nosheet:    { row: 's-block', badge: 'b-block', label: 'no sheet yet' },
       };
+
+      /**
+       * Where a filing stands in the queue. Lower sorts first.
+       *
+       * This replaces grouping by villa. Grouping answered "whose portal session covers this?"
+       * — a question about the TOOL — and to answer it, it reordered the operator's work: a
+       * villa with one relaxed filing could sit above another villa's overdue one, because the
+       * villa, not the deadline, decided the position. Flat and ranked, the top of the list is
+       * simply what to do next. The session is still per-villa; it just stopped choosing the
+       * order.
+       */
+      function priorityRank(row) {
+        var kind = rowState(row);
+        if (isFinishedState(kind)) return 4;      // nothing left to do — sinks to the bottom
+        if (row.dot === 'overdue') return 0;
+        if (row.dot === 'due' && isToday(row.checkin)) return 1;
+        if (!isPostponed(row)) return 2;          // inside the 24h window
+        return 3;                                 // later
+      }
+
+      /** The worklist in the order it should be worked: rank first, then soonest check-in. */
+      function byPriority(rows) {
+        return rows.slice().sort(function (a, b) {
+          var d = priorityRank(a) - priorityRank(b);
+          if (d !== 0) return d;
+          var ta = checkinDayMs(a.checkin);
+          var tb = checkinDayMs(b.checkin);
+          if (ta !== tb) return (ta === null ? Infinity : ta) - (tb === null ? Infinity : tb);
+          return String(a.villa).localeCompare(String(b.villa));
+        });
+      }
 
       /** A group whose every row is in one of these has nothing left to do → AMB-5 sink. */
       function isFinishedState(s) { return s === 'awaiting' || s === 'approved'; }
@@ -791,10 +947,10 @@
       }
 
       /**
-       * Which bucket a row falls in. **Per ROW, not per villa** — AMB-1 (2026-07-20): a villa
-       * straddling the boundary renders in BOTH buckets, and its postponed filing is never
-       * promoted just because a sibling is urgent. The villa group is a rendering inside each
-       * bucket, not an atomic unit that drags its members across.
+       * Whether a row sits beyond the 24h horizon. **Per ROW, not per villa** — AMB-1
+       * (2026-07-20): a villa's postponed filing is never promoted just because a sibling is
+       * urgent. Now that the list is flat this feeds `priorityRank` rather than choosing a
+       * container, but the per-row rule is the same one and must stay per-row.
        *
        * The boundary is the check-in (014 §7.1 Q2), measured against `state.renderNow` — an
        * instant captured ONCE, never a ticking clock.
@@ -823,80 +979,8 @@
         return 'need';
       }
 
-      /**
-       * Groups rows by villa, PRESERVING ARRAY ORDER.
-       *
-       * AMB-4 (closed by existing code): the backend already sorts check-in → `filing_id`
-       * (`tm30.service.ts:143-147`), so a group's position is its first member's position and
-       * "most-urgent group first / most-urgent row first" falls out for free. Re-sorting here
-       * against a locally-derived key is exactly how the two halves drift apart — so we don't.
-       */
-      function groupByVilla(rows) {
-        var order = [];
-        var byVilla = Object.create(null);
-
-        rows.forEach(function (row) {
-          if (!byVilla[row.villa]) {
-            byVilla[row.villa] = [];
-            order.push(row.villa);
-          }
-          byVilla[row.villa].push(row);
-        });
-
-        return order.map(function (villa) {
-          var members = byVilla[villa];
-          return {
-            villa: villa,
-            rows: members,
-            finished: members.every(function (r) { return isFinishedState(rowState(r)); }),
-          };
-        });
-      }
-
-      /** AMB-5: fully-finished villa groups SINK below the actionable ones. Stable. */
-      function sinkFinished(groups) {
-        var actionable = groups.filter(function (g) { return !g.finished; });
-        var done = groups.filter(function (g) { return g.finished; });
-        return actionable.concat(done);
-      }
 
       // ── row actions ────────────────────────────────────────────────────────────────────
-
-      /**
-       * ⬇ xlsx — THE trick (005 §8.3.1). No DOM automation, no upload robot: the Helper puts
-       * the sheet on the operator's disk and the human uploads it in the portal pane by hand.
-       * That is the entire "connect Excel to the portal" mechanism, and it is why this is the
-       * one and only byte the Helper ever pulls (014 §2.5 stands — this is a user-initiated
-       * FILE download, not a data fetch).
-       */
-      function downloadSheet(row, btn) {
-        if (!row.sheet_download_url) return;
-
-        if (!window.tm30Native) {
-          console.error('[tm30-helper] tm30Native bridge is missing — preload did not load');
-          setStatusNote('download unavailable — the native bridge did not load', 'st-none');
-          return;
-        }
-
-        btn.disabled = true;
-        btn.textContent = '⬇ downloading…';
-
-        window.tm30Native.downloadSheet(row.sheet_download_url).then(function (res) {
-          if (res && res.ok) {
-            state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {};
-            state.rowLocal[row.filing_id].downloadPath = res.path;
-            state.rowLocal[row.filing_id].downloadError = null;
-            // 4a′ PO ruling: English. (v1 said `лист скачан ✓`.)
-            setStatusNote('sheet downloaded ✓ · ' + res.path, 'st-ok');
-          } else {
-            var why = (res && res.error) || 'unknown error';
-            state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {};
-            state.rowLocal[row.filing_id].downloadError = why;
-            setStatusNote('download failed — ' + why, 'st-none');
-          }
-          renderList();
-        });
-      }
 
       /**
        * ⇥ insert — T3-08, THE END OF THE MANUAL FILE PICK.
@@ -939,7 +1023,7 @@
 
         state.insertBusy = row.filing_id;
         syncAllInsertButtons();
-        if (btn) btn.textContent = '⇥ inserting…';
+        if (btn) setLabel(btn, 'insert', 'inserting sheet…');
         setStatusNote('inserting the sheet into the portal…', 'st-none');
 
         window.tm30Native.insertSheet({
@@ -1151,14 +1235,51 @@
         var top = document.createElement('div');
         top.className = 'row-top';
 
+        /*
+          Villa and date on one line. With the list flat there is no group header above to name
+          the villa, so the row says it — once, beside the date, rather than as a second line
+          under it.
+        */
         var left = document.createElement('div');
-        var villa = document.createElement('div');
+        left.className = 'row-id';
+
+        var villa = document.createElement('span');
         villa.className = 'villa';
         villa.textContent = row.villa; // one name, never split (009 §10)
+        left.appendChild(villa);
+
+        /*
+          The booking reference — `contract.internal_id`, e.g. `C100-04082026-001`. This is the
+          identifier that appears on the contract, in messages and in the reservations table,
+          so a filing can be matched to a booking without translating between two identifier
+          systems. Monospaced and quiet: it is looked up character by character, not read.
+        */
+        if (row.internal_id) {
+          var ref = document.createElement('span');
+          ref.className = 'ref';
+          ref.textContent = row.internal_id;
+          left.appendChild(ref);
+        }
 
         var when = document.createElement('div');
         when.className = 'when';
+        /*
+          The stay, not only its start. A filing is due against the check-IN — that is what the
+          dot and the buckets are computed from, and it stays first — but an operator standing
+          in the portal needs the check-OUT too, because it is what the form asks for. Absent
+          on rows the backend sent before `checkout` existed, so the arrow only appears with it.
+        */
         when.textContent = formatCheckinDay(row.checkin);
+        if (row.checkout) {
+          var sep = document.createElement('span');
+          sep.className = 'when-sep';
+          sep.textContent = '\u2192';
+          when.appendChild(sep);
+          var out = document.createElement('span');
+          out.className = 'when-out';
+          out.textContent = formatCheckinDay(row.checkout);
+          when.appendChild(out);
+        }
         /**
          * The server's dot, rendered as-is — the ONLY urgency signal on the row.
          *
@@ -1170,21 +1291,17 @@
          * and otherwise the date stands by itself (which is what the mockup draws for the
          * postponed rows). This is label formatting, not a re-derived dot.
          */
-        if (row.dot === 'overdue') {
-          when.appendChild(document.createTextNode(' · '));
-          var over = document.createElement('span');
-          over.className = 'over';
-          over.textContent = 'Overdue';
-          when.appendChild(over);
-        } else if (row.dot === 'due' && isToday(row.checkin)) {
+        // `overdue` is NOT restated here: the badge on this same line already says it, and it
+        // said it twice, in two different weights, four words apart. "Due today" stays — the
+        // badge speaks about the sheet, this speaks about the clock, and they can disagree.
+        if (row.dot === 'due' && isToday(row.checkin)) {
           when.appendChild(document.createTextNode(' · '));
           var due = document.createElement('span');
           due.className = 'due';
           due.textContent = 'Due today';
           when.appendChild(due);
         }
-        left.appendChild(villa);
-        left.appendChild(when);
+
 
         var badge = document.createElement('span');
         badge.className = 'badge ' + art.badge;
@@ -1193,21 +1310,34 @@
         top.appendChild(left);
         top.appendChild(badge);
         box.appendChild(top);
+        // The stay gets its own line. Villa + reference + both dates on one flex row overran
+        // 360px and broke "Wed 5 Aug" across two lines mid-date.
+        box.appendChild(when);
 
-        // ── actions: status · xlsx · folder, always all three, disabled not hidden ──
+        // ── actions: status · insert · xlsx · folder · session, one line, never hidden ──
         var acts = document.createElement('div');
         acts.className = 'acts';
 
+        /*
+          No session controls on the row. The explicit "Log in" chip was redundant with the
+          gesture that already exists — clicking a row calls `setActiveVilla`, which is what
+          opens that villa's portal session — and it repeated on every filing of a villa.
+
+          Both moved to the portal pane's `.sessionbar` (Q2) rather than being dropped: the
+          session state and `freshLogin()` are stated ONCE, for the villa the operator is
+          actually looking at, instead of once per filing that villa owns. The row keeps the
+          only part that is per-filing — the padlock on its primary action.
+        */
         var statusBtn = document.createElement('button');
         statusBtn.type = 'button';
         statusBtn.className = 'btn act-status';
         if (kind === 'approved') {
           statusBtn.classList.add('done');
-          statusBtn.textContent = '✓ Approved';
+          setLabel(statusBtn, 'check', 'Approved');
           statusBtn.disabled = true;
         } else if (kind === 'awaiting' && !(local.submitted && row.status !== 'submitted')) {
           statusBtn.classList.add('done');
-          statusBtn.textContent = '✓ Submitted';
+          setLabel(statusBtn, 'check', 'Submitted');
           statusBtn.disabled = true;
         } else if (kind === 'awaiting') {
           /**
@@ -1216,7 +1346,7 @@
            * outcome it never saw, and would strand an operator whose browser tab got closed
            * before they confirmed. So the control stays live and says exactly what it is.
            */
-          statusBtn.textContent = '↗ Reopen web confirm';
+          setLabel(statusBtn, 'external', 'Reopen confirm');
           statusBtn.title =
             'The Helper only opened your browser — it cannot see whether you confirmed. ' +
             'Reopen the web confirm if you did not finish it.';
@@ -1250,19 +1380,29 @@
            * control away.
            */
           var locked = isLocked(row.villa);
+          statusBtn.classList.add('primary');
           if (locked) {
+            // Outlined rather than filled (`.locked`) — the invitation is lowered, the control
+            // is not disguised. Stripping `.primary` outright left the row's main action
+            // looking like disabled text.
+            statusBtn.classList.add('locked');
             statusBtn.title =
               'Log in to this villa in the portal first — select the villa and solve the ' +
               'captcha. You can still mark it submitted if you logged in by hand.';
-          } else {
-            statusBtn.classList.add('primary');
           }
-          statusBtn.textContent = '✓ Mark as submitted';
+          /*
+            Q2: the row keeps a session signal of its own — a padlock instead of the tick when
+            the villa is not logged in. With the session chip moved to the portal pane, the
+            outline alone was the only per-row hint, and an outline is a difference you can see
+            but not name; the padlock says which of the two states this is without the operator
+            having to look at the other pane to find out.
+          */
+          setLabel(statusBtn, locked ? 'lock' : 'check', 'Mark as submitted');
           // nothing was uploaded → nothing to attest; no return link → nowhere to hand back to.
           statusBtn.disabled = kind === 'nosheet' || !canHandBack(row);
           if (!canHandBack(row)) {
             // 🔴 Loud, not silent (014 §7.9). A dead button with no reason is the same bug.
-            statusBtn.classList.remove('primary');
+            statusBtn.classList.remove('primary', 'locked');
             statusBtn.title =
               'This row arrived without a usable return link, so the Helper cannot open the ' +
               'web confirm. Reopen the Helper from the web tab to get a fresh link.';
@@ -1282,7 +1422,7 @@
         var insertBtn = document.createElement('button');
         insertBtn.type = 'button';
         insertBtn.className = 'btn act-insert';
-        insertBtn.textContent = state.insertBusy === row.filing_id ? '⇥ inserting…' : '⇥ insert';
+        setLabel(insertBtn, 'insert', state.insertBusy === row.filing_id ? 'inserting sheet…' : 'insert sheet');
         insertBtn.setAttribute('data-villa', row.villa);
         if (row.sheet_download_url) insertBtn.setAttribute('data-has-sheet', '1');
         syncInsertButton(insertBtn);
@@ -1291,26 +1431,23 @@
           insertSheet(row, insertBtn);
         });
 
-        var sheetBtn = document.createElement('button');
-        sheetBtn.type = 'button';
-        sheetBtn.className = 'btn act-sheet';
-        sheetBtn.textContent = '⬇ xlsx';
-        if (!row.sheet_download_url) {
-          // `no sheet yet` — D-2 has not generated it. Disabled, never absent (mockup H2).
-          sheetBtn.disabled = true;
-          sheetBtn.title = 'The sheet is generated from D-2 — nothing to download yet.';
-        } else {
-          sheetBtn.title = 'Download the sheet to your Downloads folder';
-          sheetBtn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            downloadSheet(row, sheetBtn);
-          });
-        }
+        /*
+          No xlsx download button. The bytes it fetched are what `insert` places into the
+          portal form for you, and the folder beside it reaches the same artifact on Drive —
+          so the button was a third road to a file the other two already deliver.
 
+          `downloadSheet()` went with it: nothing called it once the button was gone, and it
+          was NOT shared with `insertSheet`, which goes through `tm30Native.insertSheet`. The
+          native `tm30Native.downloadSheet` bridge is left in place — it is main-process
+          surface, not dead renderer code — so restoring the button is a UI-only change.
+          The `downloaded` row state survives regardless: `insertSheet` sets `downloadPath` too.
+        */
         var folderBtn = document.createElement('button');
         folderBtn.type = 'button';
         folderBtn.className = 'btn act-folder';
-        folderBtn.textContent = '📁';
+        setLabel(folderBtn, 'folder', '');
+        folderBtn.classList.add('icon-only');
+        folderBtn.title = 'Open the Drive folder';
         folderBtn.title = 'Open the Drive folder';
         folderBtn.setAttribute('aria-label', 'Open the Drive folder');
         folderBtn.disabled = !row.folder_url;
@@ -1321,7 +1458,6 @@
 
         acts.appendChild(statusBtn);
         acts.appendChild(insertBtn);
-        acts.appendChild(sheetBtn);
         acts.appendChild(folderBtn);
         box.appendChild(acts);
 
@@ -1370,153 +1506,6 @@
         return box;
       }
 
-      /**
-       * One villa group — the SESSION unit (014 §7.2). The header owns the login; the rail down
-       * the body is "this login owns these filings", drawn.
-       *
-       * The pill reads `state.villaSession[villa]` — keyed by VILLA, never by group box (AMB-1).
-       * 4e writes that map on a successful autofill, and the pill turns green with no change
-       * here — the seam 4d left worked as designed.
-       *
-       * ⚠️ The `locked` CLASS carries no rule of its own: `.vgroup-h`'s amber `border-left` and
-       * `.vg-body`'s amber rail ARE the locked look, and `open-session` / `no-acct` override
-       * them. So `locked` is the DEFAULT state of a credentialed group, which is correct — a
-       * freshly-opened Helper has solved no captchas.
-       *
-       * ⚠️ The mockup also dims a locked group's row ACTIONS. 4e applies that to exactly one
-       * affordance — see the long comment on the `✓ Mark as submitted` button in `renderRow`.
-       * The ⬇ download and 📁 folder are Drive-side and stay live at all times.
-       */
-      function renderVillaGroup(group) {
-        var account = accountFor(group.villa);
-        var session = state.villaSession[group.villa] || null;
-
-        var box = document.createElement('div');
-        box.className = 'vgroup' +
-          (!account ? ' no-acct' : session ? ' open-session' : ' locked') +
-          (group.finished ? ' finished' : '') +
-          (group.villa === state.activeVilla ? ' sel' : '');
-        box.setAttribute('data-villa', group.villa);
-
-        /**
-         * 4g: the header used to be a <button>, but the ↻ fresh-login control now lives inside
-         * the header row and HTML forbids a button inside a button. So the header is a
-         * div[role=button] carrying the exact same look (`.vgroup-h` styles are unchanged),
-         * the same whole-row click-to-select, and Enter/Space handling to stay keyboardable.
-         */
-        var head = document.createElement('div');
-        head.className = 'vgroup-h';
-        head.setAttribute('role', 'button');
-        head.setAttribute('tabindex', '0');
-        head.setAttribute('data-villa', group.villa);
-
-        var id = document.createElement('div');
-        id.className = 'vg-id';
-        var name = document.createElement('div');
-        name.className = 'vg-name';
-        name.textContent = group.villa;
-        var acct = document.createElement('div');
-        if (account) {
-          acct.className = 'vg-acct';
-          acct.textContent = account.login;
-        } else {
-          // Calm and first-class: on day one this is most villas, not a fault (014 §7.9).
-          acct.className = 'vg-acct none';
-          acct.textContent = 'no portal credentials yet';
-        }
-        id.appendChild(name);
-        id.appendChild(acct);
-
-        var pill = document.createElement('span');
-        if (!account) {
-          pill.className = 'vg-pill manual';
-          pill.textContent = 'manual login';
-        } else if (session) {
-          pill.className = 'vg-pill open';
-          pill.textContent = '🔓 session open';
-        } else {
-          pill.className = 'vg-pill locked';
-          pill.textContent = '🔒 log in';
-        }
-
-        /**
-         * ↻ fresh login (4g part B) — on EVERY group, creds or not: a cred-less villa's
-         * operator also needs to restart a manual login (wrong account typed, expired portal
-         * session) without restarting the app. `stopPropagation` because the click must reset,
-         * not double as select-the-row — `freshLogin` itself makes the villa active anyway.
-         * A keyboard Enter/Space on this button fires a `click` on it too, and the same
-         * stopPropagation keeps it out of the header's whole-row select.
-         */
-        var fresh = document.createElement('button');
-        fresh.type = 'button';
-        fresh.className = 'vg-fresh';
-        fresh.textContent = '↻ fresh login';
-        fresh.title = "Clear this villa's portal session and start the login over";
-        fresh.addEventListener('click', function (e) {
-          e.stopPropagation();
-          freshLogin(group.villa);
-        });
-
-        head.appendChild(id);
-        head.appendChild(fresh);
-        head.appendChild(pill);
-        head.addEventListener('click', function () { setActiveVilla(group.villa); });
-        head.addEventListener('keydown', function (e) {
-          if (e.target !== head) return; // the ↻ button handles its own keys
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setActiveVilla(group.villa);
-          }
-        });
-        box.appendChild(head);
-
-        var body = document.createElement('div');
-        body.className = 'vg-body';
-        group.rows.forEach(function (row) { body.appendChild(renderRow(row)); });
-        box.appendChild(body);
-
-        return box;
-      }
-
-      /** The collapsible "postponed (24h+)" group. Hidden entirely when empty (014 §2.5). */
-      function renderPostponedGroup(groups) {
-        var filings = groups.reduce(function (n, g) { return n + g.rows.length; }, 0);
-
-        var box = document.createElement('div');
-        box.className = 'group' + (state.postponedOpen ? ' open' : '');
-
-        var head = document.createElement('button');
-        head.type = 'button';
-        head.className = 'group-h';
-        head.setAttribute('aria-expanded', state.postponedOpen ? 'true' : 'false');
-
-        var chev = document.createElement('span');
-        chev.className = 'chev';
-        chev.textContent = '▶';
-        head.appendChild(chev);
-        head.appendChild(document.createTextNode('postponed (24h+) '));
-
-        var sub = document.createElement('span');
-        sub.className = 'sub';
-        sub.textContent = '· ' + groups.length + ' villa' + (groups.length === 1 ? '' : 's') +
-          ' · ' + filings + ' filing' + (filings === 1 ? '' : 's');
-        head.appendChild(sub);
-
-        head.addEventListener('click', function () {
-          state.postponedOpen = !state.postponedOpen;
-          renderList();
-        });
-        box.appendChild(head);
-
-        if (state.postponedOpen) {
-          var body = document.createElement('div');
-          body.className = 'group-body';
-          groups.forEach(function (g) { body.appendChild(renderVillaGroup(g)); });
-          box.appendChild(body);
-        }
-
-        return box;
-      }
 
       /**
        * 🔴 THE 4d SEAM (replaces 4c's placeholder). Everything the shell relies on is kept:
@@ -1539,43 +1528,45 @@
             '<div class="sm">Every filing within the next 24 hours is submitted. ' +
             'Re-open from the web to refresh this list.</div>';
           el.list.appendChild(empty);
-          state.buckets = { postponed: [], main: [] };
           return;
         }
 
-        var postponedRows = [];
-        var mainRows = [];
-        state.worklist.forEach(function (row) {
-          (isPostponed(row) ? postponedRows : mainRows).push(row);
+        /*
+          Flat, in the order the work should be done. The two structures this replaces —
+          grouping by villa, and a collapsed "postponed (24h+)" bucket — both reordered the
+          queue around something other than urgency: the villa that owned a filing, or the
+          side of a 24h line it fell on. An overdue filing could sit below a relaxed one
+          because its villa sorted later, or be two clicks away inside a folded group.
+
+          The 24h boundary survives as a RANK (`priorityRank`), not as a container: later
+          filings sink to the bottom, where they stop competing for attention without being
+          hidden from it.
+        */
+        var ordered = byPriority(state.worklist);
+
+        ordered.forEach(function (row) {
+          el.list.appendChild(renderRow(row));
         });
 
-        var postponedGroups = groupByVilla(postponedRows);
-        var mainGroups = sinkFinished(groupByVilla(mainRows));
-        state.buckets = { postponed: postponedGroups, main: mainGroups };
-
-        if (postponedGroups.length) {
-          el.list.appendChild(renderPostponedGroup(postponedGroups));
-
-          var divider = document.createElement('div');
-          divider.className = 'divider';
-          divider.textContent = 'within 24h';
-          el.list.appendChild(divider);
-        }
-
-        mainGroups.forEach(function (g) { el.list.appendChild(renderVillaGroup(g)); });
       }
 
-      /** Mockup H4: `4 villas · 5 within 24h`. Reads the buckets `renderList` just computed. */
+      /**
+       * The header count, now measured in work rather than in containers.
+       *
+       * It read "4 villas · 5 within 24h" — both halves counted the structures the list used
+       * to be built from. With the list flat the operator's question is "how much is on me,
+       * and how much of it is late", so that is what it answers.
+       */
       function renderCount() {
-        if (!state.worklist.length) {
+        var rows = state.worklist || [];
+        if (!rows.length) {
           el.count.textContent = '0';
           return;
         }
-        var main = (state.buckets && state.buckets.main) || [];
-        var villas = main.length;
-        var filings = main.reduce(function (n, g) { return n + g.rows.length; }, 0);
+        var open = rows.filter(function (r) { return !isFinishedState(rowState(r)); });
+        var late = open.filter(function (r) { return r.dot === 'overdue'; }).length;
         el.count.textContent =
-          villas + ' villa' + (villas === 1 ? '' : 's') + ' · ' + filings + ' within 24h';
+          open.length + ' to file' + (late ? ' \u00b7 ' + late + ' overdue' : '');
       }
 
       // ── status line (mockup H8) ────────────────────────────────────────────────────────
@@ -1866,6 +1857,13 @@
           if (activePortal) activePortal.el.reload();
         });
 
+        // Q2: the session reset, in the pane it resets. Bound ONCE here rather than rebuilt by
+        // `renderSessionBar` — the bar repaints on every selection, and re-adding a listener
+        // each time is how one click becomes four.
+        el.sbFresh.addEventListener('click', function () {
+          if (state.activeVilla) freshLogin(state.activeVilla);
+        });
+
         /**
          * 🔴 This subscription is registered BEFORE `mountAutofill`'s (boot order at the
          * bottom of the file): listeners run in registration order, so by the time 4e's
@@ -1907,7 +1905,8 @@
         delete state.villaSession[villa];
         renderList();
         renderCount();
-        renderStatusLine(); // the pill is already back to 🔒 log in / manual login
+        renderStatusLine();
+        renderSessionBar(); // the pill is already back to `log in` / `manual login`
 
         if (!window.tm30Native || !window.tm30Native.resetPortalSession) {
           setStatusNote('fresh login unavailable — the native bridge did not load', 'st-none');
@@ -2169,8 +2168,9 @@
 
         // 4a′ PO ruling: English. v1 said `✓ подставлено` (`window.html:204`).
         setPortalStatus('credentials filled ✓', 'st-ok');
-        renderList(); // the group's pill flips 🔒 log in → 🔓 session open, and the rail turns green
+        renderList(); // the row's primary action stops being outlined — the villa is unlocked
         renderCount();
+        renderSessionBar(); // the pill flips `log in` → `session open`, and the rail turns green
       }
 
       /**
@@ -2608,7 +2608,9 @@
         if (focusRow) {
           state.focusFilingId = payload.focus_filing_id;
           if (!state.renderNow) state.renderNow = Date.now(); // the same captured instant renderList would take
-          if (isPostponed(focusRow)) state.postponedOpen = true;
+          // A postponed focus row used to need the collapsed group expanded before it could be
+          // seen. The list is flat now, so every row is already on screen and there is nothing
+          // left to open — `.row.focused` and the scroll-into-view below do the rest.
         } else {
           console.warn(
             '[tm30-helper] focus_filing_id ' + payload.focus_filing_id +
@@ -2617,8 +2619,8 @@
         }
       }
 
-      renderList(); // computes the buckets…
-      renderCount(); // …which this reads. Order matters.
+      renderList();
+      renderCount(); // reads `state.worklist` directly — no ordering dependency on renderList
       renderStatusLine();
       // 🔴 4g: mountPortal BEFORE mountAutofill — their `onActiveVillaChange` subscriptions run
       // in registration order, and 4e's must find the villa's pool webview already created and
