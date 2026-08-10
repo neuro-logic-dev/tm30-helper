@@ -221,3 +221,42 @@ test('🔴 isToday / isPostponed / POSTPONED_AFTER_MS are GONE from the pane', (
     assert.equal(/function isPostponed\(/.test(src), false);
     assert.equal(/var POSTPONED_AFTER_MS/.test(src), false);
 });
+
+/**
+ * 🔴 The update strip must be INVISIBLE when there is nothing to say.
+ *
+ * It shipped visible-and-empty — "TM30 Helper  is available — you are running ." — on a Helper
+ * that was perfectly up to date, because `.updbar { display: flex }` overrides the browser's
+ * `[hidden] { display: none }`. The attribute alone hides nothing from an element that sets its
+ * own `display`. Asserted against the stylesheet text, since there is no DOM here.
+ */
+test('🔴 the update strip has a rule that actually honours the hidden attribute', () => {
+    // It shipped visible-and-empty — "TM30 Helper  is available — you are running ." — on a
+    // Helper that was perfectly up to date, because `.updbar { display: flex }` overrides the
+    // browser's `[hidden] { display: none }`. The attribute alone hides nothing from an element
+    // that sets its own `display`. Asserted against the stylesheet text: there is no DOM here.
+    assert.match(
+        src,
+        /\.updbar\[hidden\]\s*\{[^}]*display:\s*none/,
+        '.updbar sets display:flex, so it needs an explicit [hidden] rule or it never hides',
+    );
+});
+
+test('every element carrying `hidden` that sets its own display has such a rule', () => {
+    // Generalised, so the next element of this shape cannot repeat the mistake.
+    const hiddenIds = [...src.matchAll(/<(\w+)[^>]*\bid="([\w-]+)"[^>]*\bhidden\b/g)].map(
+        (m) => m[2],
+    );
+    assert.ok(hiddenIds.length > 0, 'expected at least one hidden element in the markup');
+    for (const id of hiddenIds) {
+        const el = new RegExp(`<\\w+[^>]*id="${id}"[^>]*>`).exec(src)?.[0] ?? '';
+        const cls = /class="([\w -]+)"/.exec(el)?.[1]?.split(/\s+/)[0];
+        if (!cls) continue; // no class ⇒ no custom display ⇒ the attribute works by itself
+        if (!new RegExp(`\\.${cls}\\s*\\{[^}]*display:`).test(src)) continue;
+        assert.match(
+            src,
+            new RegExp(`\\.${cls}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`),
+            `.${cls} sets display and #${id} carries [hidden] — it needs a [hidden] rule`,
+        );
+    }
+});

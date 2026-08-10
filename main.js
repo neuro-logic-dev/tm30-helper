@@ -100,6 +100,13 @@ const UPDATE_CHECK_TIMEOUT_MS = 3000;
 /** The newest published version, or null while unknown / unreachable. Read when a window opens. */
 let latestKnownVersion = null;
 
+/**
+ * Set once `electron-updater` has an update ON DISK, ready to install on quit. Windows only in
+ * practice: macOS has no feed (unsigned, dmg-only), which is why the mac path is still the
+ * install page rather than a button.
+ */
+let downloadedUpdateVersion = null;
+
 async function checkForNewerRelease() {
   try {
     const res = await fetch(RELEASES_API, {
@@ -359,6 +366,29 @@ ipcMain.handle('tm30:reset-portal-session', async (_event, partition) => {
 registerInsertSheet();
 
 /** 📁 — отдаём ссылку настоящему браузеру человека. Открыть браузер ≠ сетевой вызов хелпера. */
+/**
+ * Whether a downloaded update is sitting on disk, so a freshly opened window can render the
+ * "restart now" affordance for an update that finished downloading BEFORE it existed.
+ */
+ipcMain.handle('tm30:update-state', async () => ({ downloaded: downloadedUpdateVersion }));
+
+/**
+ * Install the already-downloaded update and relaunch.
+ *
+ * 🔴 Refuses when nothing has been downloaded. `quitAndInstall` with no staged update quits the
+ * app and installs nothing — the operator's window closes and they are still on the old build,
+ * with no explanation. Not a theoretical ordering: the renderer can only ever have learned about
+ * an update from us, but the guard costs one line and the failure it prevents is silent.
+ */
+ipcMain.handle('tm30:quit-and-install', async () => {
+  if (!downloadedUpdateVersion) return { ok: false, error: 'no update has been downloaded' };
+  console.log('[tm30-helper] installing', downloadedUpdateVersion, 'at the operator\'s request');
+  // setImmediate: let this IPC call return before the app starts tearing itself down, or the
+  // renderer's promise rejects and the click looks like it failed.
+  setImmediate(() => autoUpdater.quitAndInstall());
+  return { ok: true };
+});
+
 ipcMain.handle('tm30:open-external', async (_event, rawUrl) => {
   if (!isHttpUrl(rawUrl)) return { ok: false, error: 'not an http(s) url' };
   try {
@@ -404,6 +434,16 @@ function initAutoUpdate() {
   });
   autoUpdater.on('update-downloaded', (info) => {
     console.log('[tm30-helper] update downloaded, installs on quit:', info && info.version);
+    /*
+      The update is already ON DISK and will install whenever the operator next quits. The strip
+      exists to offer them "now" instead of "eventually" — a Helper left open for a week would
+      otherwise keep running the old build while carrying the new one.
+      Pushed to every open window: `app.html` decides whether to show anything.
+    */
+    downloadedUpdateVersion = (info && info.version) || null;
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('tm30:update-downloaded', downloadedUpdateVersion);
+    }
   });
   // Сеть недоступна, релиз ещё не опубликован, GitHub прилёг — это не повод мешать
   // человеку работать. Ошибка идёт в лог, приложение продолжает как ни в чём не бывало.
