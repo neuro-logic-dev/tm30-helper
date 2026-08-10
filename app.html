@@ -284,6 +284,18 @@
       .btn:hover:not([disabled]) { border-color: var(--faint); background: var(--surface-2); }
       .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
 
+      /*
+        Keyboard focus was invisible everywhere in this pane. The rows carry `role="button"` and
+        `tabindex="0"` and answer Enter/Space, and every control is a real <button> — so the pane
+        was fully operable by keyboard and gave no clue where you were. `:focus-visible` shows the
+        ring only for keyboard traversal, so a mouse click does not leave one behind.
+      */
+      .btn:focus-visible,
+      .row:focus-visible {
+        outline: 2px solid var(--accent-ink);
+        outline-offset: 2px;
+      }
+
       /* The one that completes the filing. Filled — nothing else on the row is. */
       .btn.primary {
         background: var(--primary);
@@ -292,7 +304,31 @@
         font-weight: 550;
       }
       .btn.primary svg { opacity: 1; }
-      .btn.primary:hover:not([disabled]) { filter: brightness(1.15); color: #fff; }
+      /*
+        🔴 BACKGROUND IS RESTATED HERE, and it is not redundant.
+        `.btn:hover:not([disabled])` above sets `background: var(--surface-2)` — near-white — for
+        every button. This rule is more specific, but specificity is per-PROPERTY: it used to
+        declare only `filter` and `color`, so the generic rule's near-white background still won,
+        under `.btn.primary`'s `color: #fff`. White on near-white: the primary action went blank
+        the moment the pointer touched it. Restating background + border-color pins it.
+      */
+      .btn.primary:hover:not([disabled]) {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+        filter: brightness(1.15);
+      }
+      /*
+        …and `.locked` has to say it again, for the mirror-image reason: it is `.btn.primary` too,
+        so without this it would inherit the dark fill above while keeping its own dark `--ink`
+        text. Dark on dark is the same bug wearing the other coat.
+      */
+      .btn.primary.locked:hover:not([disabled]) {
+        background: var(--surface-2);
+        border-color: var(--ink);
+        color: var(--ink);
+        filter: none;
+      }
       /*
         Not yet inviting, still obviously pressable: the villa has no portal session, so filing
         has not happened yet. It used to drop to a bare ghost here, which read as broken.
@@ -633,12 +669,12 @@
          * sent to a backend status"). `{ downloadPath, downloadError, submitted }`.
          */
         rowLocal: Object.create(null),
-        /**
-         * 🔴 The bucket boundary, captured ONCE. 014 §2.1 / §7.1 Q2 / 007 GAP-6: NO countdown,
-         * NO live timer, ever. Every re-render (download, mark-submitted) reuses this instant,
-         * so a row can never migrate buckets while the operator is looking at it.
-         */
-        renderNow: 0,
+        /*
+          `renderNow` was here: a once-captured instant that stopped a row migrating buckets while
+          the operator read it. Its only readers were `isToday` and `isPostponed`, and ADR-0014
+          deleted both — the server now says which bucket a row is in, so there is no clock left
+          on this side to freeze. Removed rather than left as a field nothing reads.
+        */
         /** Transient status-line note, e.g. `sheet downloaded ✓`. */
         statusNote: null,
 
@@ -1517,10 +1553,6 @@
        * `state.villaSession` is NOT re-keyed per group — it stays villa-keyed (AMB-1).
        */
       function renderList() {
-        // The instant is captured ONCE, on the first render, and reused by every re-render.
-        // A row must never change bucket because the operator took a minute to read it.
-        if (!state.renderNow) state.renderNow = Date.now();
-
         el.list.textContent = '';
 
         if (!state.worklist.length) {
@@ -2624,7 +2656,6 @@
         }
         if (focusRow) {
           state.focusFilingId = payload.focus_filing_id;
-          if (!state.renderNow) state.renderNow = Date.now(); // the same captured instant renderList would take
           // A postponed focus row used to need the collapsed group expanded before it could be
           // seen. The list is flat now, so every row is already on screen and there is nothing
           // left to open — `.row.focused` and the scroll-into-view below do the rest.
