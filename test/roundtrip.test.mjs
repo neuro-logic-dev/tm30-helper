@@ -32,11 +32,14 @@ const require = createRequire(import.meta.url);
 globalThis.window = { btoa: globalThis.btoa };
 
 const emitter = require(path.join(here, '.build', 'tm30.js'));
-const { parseDeepLink, DeepLinkKind } = require(path.join(here, '..', 'deeplink.js'));
+const { parseDeepLink, DeepLinkKind, payloadDigest } = require(path.join(here, '..', 'deeplink.js'));
 
 const {
     buildTm30DeepLink,
     buildTm30DeepLinkV2,
+    buildTm30HelperLink,
+    toTm30HelperWorklistV3,
+    tm30PayloadDigest,
     buildTm30ReturnUrl,
     toTm30HelperWorklist,
     toBase64Url: _unused,
@@ -64,7 +67,11 @@ const wireRowWithAccount = {
         login: 'sunsetpalms.tm30@moestate.com',
         pass: 'Wq7!ktm30-SunsetPalms',
     },
-    sheet_download_url: 'https://drive.google.com/uc?export=download&id=1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVw',
+    // BUG-2: the row's download URL is OUR streaming endpoint, not the stored Drive webViewLink
+    // (a Sheets /edit page behind Google auth, which the Helper cannot fetch). This fixture said
+    // Drive for as long as the code has said otherwise — corrected 2026-08-10, and it is what
+    // `resolveApiBase` reads to build the v3 `api_base`.
+    sheet_download_url: 'https://api.moestate.com/tm30/filings/4821/sheet',
     folder_url: 'https://drive.google.com/drive/folders/1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVw',
     // Display-only, and both were silently dropped by `normalizeRow` for as long as they had
     // been on the wire — the emitter forwarded them, the parser's allowlist did not copy them,
@@ -81,7 +88,7 @@ const wireRowNoAccount = {
     checkin: '2026-07-23T00:00:00.000Z',
     status: 'sheet_ready',
     dot: 'due',
-    sheet_download_url: 'https://drive.google.com/uc?export=download&id=2b3C4d5E6f7G8h9I0j1KlMnOpQrStUvWx',
+    sheet_download_url: 'https://api.moestate.com/tm30/filings/4822/sheet',
     folder_url: 'https://drive.google.com/drive/folders/2b3C4d5E6f7G8h9I0j1KlMnOpQrStUvWx',
 };
 
@@ -438,4 +445,203 @@ test('overflow REFUSES rather than truncating (the silent failure mode 014 §7.9
         Tm30DeepLinkTooLargeError,
         'an over-ceiling worklist must throw, not emit a link the OS will chop'
     );
+});
+
+// ═══════════════════ (e) v3 — THE NEGOTIATED SEAM (ADR-0015) ═══════════════════════════
+//
+// The half that did not exist when DD-6 shipped the parser. `deeplink-v3.test.mjs` tests the
+// parser against its own fixtures; THIS tests it against the real emitter's real output, which
+// is the only arrangement that catches the drift 013 §5 row 3 shipped with.
+
+/** Enough distinct villas and filings to push a v2 link over the 8192 ceiling. */
+const bigWorklist = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+        ...wireRowWithAccount,
+        filing_id: 4900 + i,
+        booking_id: 91000 + i,
+        villa: `Villa Number ${Math.floor(i / 3)} — Bang Tao, Phuket`,
+        sheet_download_url: `https://api.moestate.com/tm30/filings/${4900 + i}/sheet`,
+        account: {
+            ...wireRowWithAccount.account,
+            name: `Villa Number ${Math.floor(i / 3)} — Bang Tao, Phuket`,
+            login: `villa${Math.floor(i / 3)}.tm30@moestate.com`,
+        },
+    }));
+
+test('(e1) a SMALL worklist still emits v2 — an un-updated Helper is never worse off', () => {
+    const url = buildTm30HelperLink([wireRowWithAccount, wireRowNoAccount], ORIGIN);
+    const result = parseDeepLink(url);
+    assert.equal(result.kind, DeepLinkKind.V2);
+    assert.equal(result.payload_version, 2, 'v2 is used while it fits — no ordering constraint');
+});
+
+test('(e2) a worklist too big for v2 drops to v3 and still parses', () => {
+    const items = bigWorklist(16);
+    // The v2 builder THROWS above the ceiling, so its own error carries the length. Calling it
+    // for the measurement is the point: the fixture has to genuinely overflow v2, or (e2) would
+    // be asserting a fallback that never fired.
+    let v2Length = 0;
+    try {
+        buildTm30DeepLinkV2({ worklist: toTm30HelperWorklist(items, ORIGIN) });
+    } catch (err) {
+        v2Length = err.urlLength;
+    }
+    assert.ok(v2Length > TM30_DEEP_LINK_MAX_URL_CHARS, 'fixture must actually overflow v2');
+
+    const result = parseDeepLink(buildTm30HelperLink(items, ORIGIN));
+    assert.equal(result.kind, DeepLinkKind.V2);
+    assert.equal(result.payload_version, 3);
+    assert.equal(result.worklist.length, 16, 'every filing survives — nothing is dropped');
+});
+
+test('🔴 (e3) v3 carries the SAME information as v2 — row for row, key for key', () => {
+    // The claim ADR-0015 rests on: compaction removes redundancy, never content. Both shapes are
+    // parsed and compared, so an omission on either side fails here rather than in the pane.
+    const items = [wireRowWithAccount, wireRowNoAccount];
+
+    const viaV2 = parseDeepLink(
+        buildTm30DeepLinkV2({ worklist: toTm30HelperWorklist(items, ORIGIN) }),
+    );
+    const v3Body = toTm30HelperWorklistV3(items, ORIGIN);
+    assert.ok(v3Body, 'v3 must be representable for this worklist');
+    const viaV3 = parseDeepLink(
+        'tm30://open?d=' +
+            Buffer.from(JSON.stringify({ v: 3, ...v3Body }), 'utf8').toString('base64url'),
+    );
+
+    assert.equal(viaV3.kind, DeepLinkKind.V2);
+    assert.deepEqual(viaV3.worklist, viaV2.worklist);
+});
+
+test('(e4) the cred-less row survives compaction as an ABSENT account, never a stub', () => {
+    const items = bigWorklist(15).concat([wireRowNoAccount]);
+    const result = parseDeepLink(buildTm30HelperLink(items, ORIGIN));
+    assert.equal(result.payload_version, 3);
+    const credless = result.worklist.find((r) => r.filing_id === wireRowNoAccount.filing_id);
+    assert.equal('account' in credless, false);
+});
+
+test('(e5) focus survives the drop to v3', () => {
+    const items = bigWorklist(16);
+    const result = parseDeepLink(buildTm30HelperLink(items, ORIGIN, items[3].filing_id));
+    assert.equal(result.payload_version, 3);
+    assert.equal(result.focus_filing_id, items[3].filing_id);
+});
+
+test('🔴 (e6) over the ceiling even in v3, the emitter still REFUSES — never truncates', () => {
+    const items = bigWorklist(60);
+    assert.throws(
+        () => buildTm30HelperLink(items, ORIGIN),
+        Tm30DeepLinkTooLargeError,
+        'a silently shortened worklist is the one outcome worse than failing',
+    );
+});
+
+test('(e7) v3 is skipped, not guessed, when it cannot honestly represent the worklist', () => {
+    // No row carries a sheet URL ⇒ `api_base` is unknowable. The emitter stays on v2 rather than
+    // inventing an origin, and refuses if v2 does not fit.
+    const noSheets = bigWorklist(16).map(({ sheet_download_url: _drop, ...rest }) => rest);
+    assert.equal(toTm30HelperWorklistV3(noSheets, ORIGIN), null);
+    assert.throws(() => buildTm30HelperLink(noSheets, ORIGIN), Tm30DeepLinkTooLargeError);
+});
+
+test('(e8) payload size: v3 measured through the REAL emitter', () => {
+    let fits = 0;
+    for (let n = 1; n <= 40; n += 1) {
+        const items = bigWorklist(n);
+        const body = toTm30HelperWorklistV3(items, ORIGIN);
+        if (!body) break;
+        const url =
+            'tm30://open?d=' +
+            Buffer.from(JSON.stringify({ v: 3, ...body }), 'utf8').toString('base64url');
+        if (url.length <= TM30_DEEP_LINK_MAX_URL_CHARS) fits = n;
+    }
+    const body = toTm30HelperWorklistV3(bigWorklist(40), ORIGIN);
+    const per = Math.round(
+        ('tm30://open?d=' +
+            Buffer.from(JSON.stringify({ v: 3, ...body }), 'utf8').toString('base64url')).length / 40,
+    );
+    console.log(`  ≈ ${per} chars per filing (v3, real emitter) → ceiling at ≈ ${fits} filings`);
+    /*
+      MEASURED, and BELOW the ≥20 the plan's AC-18 assumed — that target came from a lighter
+      estimate than this fixture, whose villa names are long and whose every row carries a
+      folder id, a checkout and an internal_id. Real figures: v2 ≈10 filings, v3 ≈16 (+60%).
+      Two further compactions were measured and deliberately NOT built (villa-by-index → 19,
+      plus a day-only `checkin` → 20); see the DD-7 report. The floor below guards erosion of
+      what was actually achieved; it is deliberately not the aspirational number.
+    */
+    assert.ok(fits >= 15, `v3 should fit ≥15 filings, fitted ${fits}`);
+});
+
+// ═══════════════ (f) THE `c=` SUBSTITUTION GUARD — both halves, at last ════════════════
+//
+// 🔴 The emitter has appended `&c=<FNV-1a>` to every worklist link since the digest existed, and
+// the parser never read it. Producer-only guard, invisible to this file because every assertion
+// above tests round-trip SUCCESS rather than verification. Closed 2026-08-10.
+
+test('(f1) the two FNV implementations agree — byte for byte, on the real emitter', () => {
+    // They live in different repos and different languages-of-record. This is the only thing
+    // standing between them and a silent divergence.
+    for (const sample of ['', 'a', 'abc', 'tm30', 'A'.repeat(1000), '🛂 unicode ✓']) {
+        assert.equal(payloadDigest(sample), tm30PayloadDigest(sample), `digest differs for ${sample.slice(0, 20)}`);
+    }
+});
+
+test('(f2) an intact link verifies and parses, v2 and v3 alike', () => {
+    assert.equal(parseDeepLink(buildTm30HelperLink([wireRowWithAccount], ORIGIN)).kind, DeepLinkKind.V2);
+    assert.equal(parseDeepLink(buildTm30HelperLink(bigWorklist(16), ORIGIN)).payload_version, 3);
+});
+
+test('🔴 (f3) SUBSTITUTION is now caught — the failure mode the digest was built for', () => {
+    const url = buildTm30HelperLink([wireRowWithAccount, wireRowNoAccount], ORIGIN);
+    const dStart = url.indexOf('d=') + 2;
+    const dEnd = url.indexOf('&c=');
+
+    let accepted = 0;
+    let altered = 0;
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+    for (let i = dStart; i < dEnd; i += 7) {
+        const original = url[i];
+        const swap = ALPHABET[(ALPHABET.indexOf(original) + 17) % ALPHABET.length];
+        if (swap === original) continue;
+        const mutated = url.slice(0, i) + swap + url.slice(i + 1);
+        const result = parseDeepLink(mutated);
+        if (result.kind !== DeepLinkKind.ERROR) {
+            accepted += 1;
+            const rows = result.worklist ?? [];
+            if (rows.some((r) => r.villa !== wireRowWithAccount.villa && r.villa !== wireRowNoAccount.villa)) {
+                altered += 1;
+            }
+        }
+    }
+
+    assert.equal(accepted, 0, `${accepted} mutated links were accepted (${altered} with altered values)`);
+});
+
+test('(f4) a link with NO checksum is still accepted — v1 and the chooser carry none', () => {
+    assert.equal(parseDeepLink('tm30://open').kind, DeepLinkKind.CHOOSER);
+    const v1 = buildTm30DeepLink({ name: 'Villa A', login: 'a@b.c', pass: 'p' });
+    assert.equal(v1.includes('&c='), false, 'the v1 emitter has never sent one');
+    assert.equal(parseDeepLink(v1).kind, DeepLinkKind.V1);
+});
+
+test('(f5) a checksum that is PRESENT but wrong is loud, and says what to do', () => {
+    const url = buildTm30HelperLink([wireRowWithAccount], ORIGIN);
+    const broken = url.replace(/&c=[0-9a-f]{8}$/, '&c=00000000');
+    const result = parseDeepLink(broken);
+    assert.equal(result.kind, DeepLinkKind.ERROR);
+    assert.match(result.reason, /checksum/);
+    assert.match(result.reason, /Reopen the Helper/);
+});
+
+test('(f6) the digest is checked BEFORE the payload is decoded', () => {
+    // A payload that is both mangled AND undecodable must report the checksum, not the decode:
+    // the checksum is the actionable message ("get a fresh link"), and it is the earlier gate.
+    const url = buildTm30HelperLink([wireRowWithAccount], ORIGIN);
+    const dStart = url.indexOf('d=') + 2;
+    const mutated = url.slice(0, dStart) + '!!!' + url.slice(dStart + 3);
+    const result = parseDeepLink(mutated);
+    assert.equal(result.kind, DeepLinkKind.ERROR);
+    assert.match(result.reason, /checksum/);
 });
