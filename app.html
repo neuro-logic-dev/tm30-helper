@@ -110,6 +110,14 @@
         Dismissible for the session only: the next launch asks again, because the reason it
         appeared has not gone away just because someone closed it.
       */
+      /*
+        🔴 THIS RULE IS LOAD-BEARING. `display: flex` below beats the browser's own
+        `[hidden] { display: none }`, so without this the strip renders even when
+        `renderUpdateBar` returned early and left it empty — "Update available: — you are
+        running ." on a Helper that is perfectly up to date. Any element that carries `hidden`
+        AND sets its own `display` needs this pair; the attribute alone is not enough.
+      */
+      .updbar[hidden] { display: none; }
       .updbar {
         display: flex;
         align-items: center;
@@ -135,6 +143,12 @@
         cursor: pointer;
       }
       .updbar button:hover { background: var(--due); color: #fff; }
+      /* Same trap as `.updbar` itself: this button carries `hidden` and sets its own display
+         via the `.updbar button` rule above, so the attribute needs an explicit escape hatch. */
+      .updbar button[hidden] { display: none; }
+      /* The one that finishes the job — filled, like the row's primary action. */
+      .updbar #updinstall { background: var(--due); color: #fff; }
+      .updbar #updinstall:hover { filter: brightness(1.1); background: var(--due); color: #fff; }
       .updbar .dismiss { border-color: transparent; font-weight: 500; opacity: 0.8; }
       .updbar .dismiss:hover { background: transparent; color: var(--due); opacity: 1; }
 
@@ -583,8 +597,11 @@
     <!-- Layer 1's strip. Rendered only when main.js passed `upd`; see `renderUpdateBar`. -->
     <div class="updbar" id="updbar" hidden>
       <span class="grow"
-        >Update available: <b id="updver"></b> — you are running <b id="updcur"></b>.</span
+        >TM30 Helper <b id="updver"></b> is available — you are running
+        <b id="updcur"></b>.</span
       >
+      <!-- Shown only when an update is downloaded and ready (Windows). -->
+      <button type="button" id="updinstall" hidden>Restart &amp; update now</button>
       <button type="button" id="updopen">Open install page</button>
       <button type="button" class="dismiss" id="upddismiss">Not now</button>
     </div>
@@ -759,6 +776,7 @@
         updver: document.getElementById('updver'),
         updcur: document.getElementById('updcur'),
         updopen: document.getElementById('updopen'),
+        updinstall: document.getElementById('updinstall'),
         upddismiss: document.getElementById('upddismiss'),
         list: document.getElementById('list'),
         count: document.getElementById('count'),
@@ -1706,6 +1724,55 @@
         el.upddismiss.addEventListener('click', function () {
           el.updbar.hidden = true;
           document.body.classList.remove('has-updbar');
+        });
+      }
+
+      /**
+       * The "restart now" affordance — offered ONLY once the update is on disk.
+       *
+       * 🔴 Two different states wear the same strip, and conflating them is the failure worth
+       * naming. "A newer release exists" (Layer 1, both platforms) can only ever send someone to
+       * the install page. "An update is DOWNLOADED and installs on quit" is Windows-only, and is
+       * the only state where a button can do the work — `quitAndInstall` with nothing staged
+       * quits the app and installs nothing. So the button appears on the second state alone, and
+       * `main.js` refuses the verb if it is ever clicked without one.
+       *
+       * The strip is shown for this even when Layer 1 said nothing: the two arrive by different
+       * routes and either is reason enough to tell the operator.
+       */
+      function armUpdateInstall() {
+        if (!window.tm30Native || !window.tm30Native.updateState) return;
+
+        function offer(version) {
+          if (!version) return;
+          el.updver.textContent = version;
+          if (!el.updcur.textContent) {
+            el.updcur.textContent = new URLSearchParams(location.search).get('cur') || '';
+          }
+          el.updinstall.hidden = false;
+          el.updbar.hidden = false;
+          document.body.classList.add('has-updbar');
+        }
+
+        window.tm30Native.updateState().then(function (s) {
+          // Downloaded BEFORE this window existed — the state, not the event, carries that case.
+          offer(s && s.downloaded);
+        }).catch(function () { /* an unreachable main process is not the strip's problem */ });
+
+        if (window.tm30Native.onUpdateDownloaded) {
+          // …and downloaded WHILE it is open.
+          window.tm30Native.onUpdateDownloaded(offer);
+        }
+
+        el.updinstall.addEventListener('click', function () {
+          el.updinstall.disabled = true;
+          el.updinstall.textContent = 'restarting…';
+          window.tm30Native.quitAndInstall().then(function (r) {
+            if (r && r.ok) return; // the app is on its way down; nothing left to say
+            el.updinstall.disabled = false;
+            el.updinstall.textContent = 'Restart & update now';
+            console.error('[tm30-helper] install refused:', r && r.error);
+          });
         });
       }
 
@@ -2760,6 +2827,7 @@
 
       renderList();
       renderUpdateBar(); // before the list: the strip changes the body layout
+      armUpdateInstall(); // may reveal the strip on its own, by a different route
       renderCount(); // reads `state.worklist` directly — no ordering dependency on renderList
       renderStatusLine();
       // 🔴 4g: mountPortal BEFORE mountAutofill — their `onActiveVillaChange` subscriptions run

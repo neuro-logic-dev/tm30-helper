@@ -39,6 +39,30 @@ contextBridge.exposeInMainWorld('tm30Native', {
     openExternal: (url) => ipcRenderer.invoke('tm30:open-external', url),
 
     /**
+     * Whether an update is already downloaded and waiting to install on quit.
+     * @returns {Promise<{downloaded: string|null}>}
+     */
+    updateState: () => ipcRenderer.invoke('tm30:update-state'),
+
+    /**
+     * Install the downloaded update and relaunch. Refused by main when nothing is staged.
+     * @returns {Promise<{ok:boolean,error?:string}>}
+     */
+    quitAndInstall: () => ipcRenderer.invoke('tm30:quit-and-install'),
+
+    /**
+     * Fires when an update finishes downloading WHILE this window is open.
+     *
+     * 🔴 The callback is wrapped rather than handed the raw IPC event: `ipcRenderer.on` passes an
+     * IpcRendererEvent whose `.sender` is the full ipcRenderer, and forwarding that into the
+     * renderer would hand page script a channel to every main-process handler. Only the version
+     * string crosses.
+     * @param {(version: string|null) => void} fn
+     */
+    onUpdateDownloaded: (fn) =>
+        ipcRenderer.on('tm30:update-downloaded', (_event, version) => fn(version)),
+
+    /**
      * A-WEB-4g: clears ONE villa partition's storage, so the operator can restart that villa's
      * portal login (↻ fresh login) without restarting the app. The main-process handler refuses
      * anything not prefixed `persist:tm30-`, so this verb can never touch the window's own
