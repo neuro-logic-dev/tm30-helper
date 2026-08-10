@@ -20,6 +20,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,7 +33,7 @@ const require = createRequire(import.meta.url);
 globalThis.window = { btoa: globalThis.btoa };
 
 const emitter = require(path.join(here, '.build', 'tm30.js'));
-const { parseDeepLink, DeepLinkKind, payloadDigest } = require(path.join(here, '..', 'deeplink.js'));
+const { parseDeepLink, DeepLinkKind, payloadDigest, compareVersions } = require(path.join(here, '..', 'deeplink.js'));
 
 const {
     buildTm30DeepLink,
@@ -40,6 +41,7 @@ const {
     buildTm30HelperLink,
     toTm30HelperWorklistV3,
     tm30PayloadDigest,
+    TM30_MIN_HELPER_VERSION,
     buildTm30ReturnUrl,
     toTm30HelperWorklist,
     toBase64Url: _unused,
@@ -644,4 +646,59 @@ test('(f6) the digest is checked BEFORE the payload is decoded', () => {
     const result = parseDeepLink(mutated);
     assert.equal(result.kind, DeepLinkKind.ERROR);
     assert.match(result.reason, /checksum/);
+});
+
+// ═══════ (g) THE VERSION FLOOR — Layer 2 of MO-TM30-HELPER-VERSIONING ═══════════════════
+//
+// The spec was retired on 2026-08-03 because "the Helper updates itself". It does — on Windows.
+// `build.mac.identity` is null, the mac target is dmg-only (electron-updater needs a zip) and no
+// `latest-mac.yml` is published, so on macOS nothing updates itself and nothing noticed. Layer 2
+// is the half that needs no network and no signing.
+
+test('(g1) the emitter puts the floor on BOTH payload shapes', () => {
+    const small = parseDeepLink(buildTm30HelperLink([wireRowWithAccount], ORIGIN));
+    assert.equal(small.payload_version, 2);
+    assert.equal(small.min_helper_version, TM30_MIN_HELPER_VERSION);
+
+    const big = parseDeepLink(buildTm30HelperLink(bigWorklist(16), ORIGIN));
+    assert.equal(big.payload_version, 3);
+    assert.equal(big.min_helper_version, TM30_MIN_HELPER_VERSION);
+});
+
+test('(g2) the floor the emitter sends is one this Helper actually satisfies', () => {
+    // Catches the release-order mistake directly: bump the emitter's floor above the Helper you
+    // are shipping and every link this build receives would be refused by it.
+    const shipping = JSON.parse(readFileSync(path.join(here, '..', 'package.json'), 'utf8')).version;
+    assert.notEqual(
+        compareVersions(shipping, TM30_MIN_HELPER_VERSION),
+        -1,
+        `this Helper is ${shipping} but the web emitter demands >= ${TM30_MIN_HELPER_VERSION}`,
+    );
+});
+
+test('(g3) a junk or absent floor leaves the key off — never refuses the link', () => {
+    const enc = (o) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
+    for (const bad of ['2.3', 'latest', '', 'v2.3.0', 2.3, null, {}]) {
+        const r = parseDeepLink(
+            'tm30://open?d=' + enc({ v: 2, worklist: [], min_helper_version: bad }),
+        );
+        assert.equal(r.kind, DeepLinkKind.V2, `a floor of ${JSON.stringify(bad)} must not break the link`);
+        assert.equal('min_helper_version' in r, false);
+    }
+    const none = parseDeepLink('tm30://open?d=' + enc({ v: 2, worklist: [] }));
+    assert.equal('min_helper_version' in none, false);
+});
+
+test('(g4) compareVersions: ordering, equality, and `null` for anything unparseable', () => {
+    assert.equal(compareVersions('2.2.0', '2.3.0'), -1);
+    assert.equal(compareVersions('2.3.0', '2.3.0'), 0);
+    assert.equal(compareVersions('2.3.1', '2.3.0'), 1);
+    assert.equal(compareVersions('2.10.0', '2.9.0'), 1, 'numeric, not lexicographic');
+    assert.equal(compareVersions('10.0.0', '9.9.9'), 1);
+    // 🔴 `null` is the honest answer, and every caller treats it as "no opinion" and lets the
+    // work through — a malformed floor must never lock an operator out of their own queue.
+    for (const junk of ['2.3', 'v2.3.0', '2.3.0-beta', '', null, undefined, 'x.y.z']) {
+        assert.equal(compareVersions(junk, '2.3.0'), null);
+        assert.equal(compareVersions('2.3.0', junk), null);
+    }
 });

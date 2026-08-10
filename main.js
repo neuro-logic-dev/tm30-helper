@@ -4,7 +4,7 @@ const fs = require('fs');
 
 const { autoUpdater } = require('electron-updater');
 
-const { parseDeepLink, DeepLinkKind, PROTOCOL } = require('./deeplink');
+const { parseDeepLink, DeepLinkKind, PROTOCOL, compareVersions } = require('./deeplink');
 const { registerInsertSheet } = require('./insert-sheet');
 
 // ---------- Single instance ----------
@@ -78,6 +78,96 @@ function openStandaloneWindow() {
  * Механизм передачи данных прежний и намеренно нулевой по зависимостям: payload
  * уезжает в query как base64url — ни preload, ни IPC, ни сети (014 §2.5).
  */
+/**
+ * MO-TM30-HELPER-VERSIONING §5 Layer 1 — "is there a newer release", asked once at startup.
+ *
+ * 🔴 WHY THIS EXISTS AT ALL, given the Helper auto-updates. It auto-updates on WINDOWS.
+ * `build.mac.identity` is null, `build.mac.target` is dmg-only (electron-updater cannot update
+ * from a dmg — it needs a zip), and no `latest-mac.yml` is published. So on macOS nothing
+ * updates itself and, until now, nothing noticed: an operator could sit on an old build
+ * indefinitely with no signal anywhere. That is the gap this closes.
+ *
+ * NON-BLOCKING by design (§5's table): a newer release existing is not a reason to stop someone
+ * filing. The hard block is Layer 2, which fires only when a LINK says it needs more.
+ *
+ * The one outbound request this app makes besides the human-initiated sheet download (014 §2.5),
+ * on a short timeout, failing silently in every direction: a version check that can take the
+ * Helper down is worse than no version check.
+ */
+const RELEASES_API = 'https://api.github.com/repos/neuro-logic-dev/tm30-helper/releases/latest';
+const UPDATE_CHECK_TIMEOUT_MS = 3000;
+
+/** The newest published version, or null while unknown / unreachable. Read when a window opens. */
+let latestKnownVersion = null;
+
+async function checkForNewerRelease() {
+  try {
+    const res = await fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const tag = typeof data?.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : null;
+    // Only remember it if it is BOTH parseable and actually newer — so the renderer never has to
+    // re-derive the comparison, and a malformed tag is indistinguishable from no answer.
+    if (compareVersions(app.getVersion(), tag) === -1) {
+      latestKnownVersion = tag;
+      console.log(`[tm30-helper] a newer release exists: ${tag} (running ${app.getVersion()})`);
+    }
+  } catch (e) {
+    console.log('[tm30-helper] update check skipped:', (e && e.message) || e);
+  }
+}
+
+/**
+ * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the per-link floor. BLOCKING.
+ *
+ * Needs no network, which is the point: it answers "can this Helper honour THIS link" from the
+ * link itself. Opening the worklist anyway would show a queue built by a payload this build only
+ * half understands — the silent-degradation failure that spec was written about.
+ *
+ * The install page is derived from the link's own `return_url` — the web app that sent us — so
+ * an operator on a staging deployment is sent to the staging install page, and no origin is
+ * hardcoded here. No derivable origin ⇒ the dialog still opens, just without the button.
+ *
+ * @returns true when the link was refused and nothing further should happen.
+ */
+function refusedForVersion(result, url) {
+  const floor = result.min_helper_version;
+  if (!floor) return false;
+  if (compareVersions(app.getVersion(), floor) !== -1) return false;
+
+  let installUrl = null;
+  try {
+    const withReturn = result.worklist.find((r) => r.return_url);
+    if (withReturn) installUrl = new URL(withReturn.return_url).origin + '/tm30-helper';
+  } catch {
+    /* an unusable return_url costs the button, not the warning */
+  }
+
+  console.error(
+    `[tm30-helper] REFUSED: link needs >= ${floor}, this is ${app.getVersion()}\n  url: ${url}`
+  );
+
+  const buttons = installUrl ? ['Open install page', 'Quit'] : ['Quit'];
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning',
+    title: 'TM30 Helper — update required',
+    message: `TM30 Helper ${app.getVersion()} is out of date.`,
+    detail:
+      `This filing queue needs version ${floor} or newer. Update the Helper and open it again ` +
+      `from the web app — nothing has been opened, and no filing has been changed.`,
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true,
+  });
+
+  if (installUrl && choice === 0) shell.openExternal(installUrl);
+  return true;
+}
+
 function openWorklistWindow(worklist, focusFilingId) {
   const win = new BrowserWindow({
     width: 1440,
@@ -101,6 +191,8 @@ function openWorklistWindow(worklist, focusFilingId) {
       // T3-07: portal-base override for the internal MOCK-portal e2e (test/mock-portal/).
       // Unset ⇒ the param is absent ⇒ app.html falls back to the real portal URL, byte-identical.
       ...(process.env.TM30_PORTAL_BASE_URL ? { portal: process.env.TM30_PORTAL_BASE_URL } : {}),
+      // Layer 1's verdict, already compared in the main process — the renderer only paints it.
+      ...(latestKnownVersion ? { upd: latestKnownVersion, cur: app.getVersion() } : {}),
     },
   });
   win.focus();
@@ -141,6 +233,8 @@ function handleDeepLink(url) {
           `${withCreds} with credentials, ${result.worklist.length - withCreds} manual-login` +
           (result.focus_filing_id !== undefined ? `, focus filing #${result.focus_filing_id}` : '')
       );
+      // Layer 2 gate — BEFORE the window. A refused link opens nothing at all.
+      if (refusedForVersion(result, url)) return;
       openWorklistWindow(result.worklist, result.focus_filing_id);
       return;
     }
@@ -340,6 +434,9 @@ app.on('second-instance', (_event, argv) => {
 
 app.whenReady().then(() => {
   initAutoUpdate();
+  // Layer 1 — fire and forget. Never awaited: a slow or unreachable GitHub must not delay the
+  // window an operator is waiting for. Its answer is read when a window opens, or not at all.
+  void checkForNewerRelease();
 
   const url = pendingLink || findDeepLinkInArgv(process.argv);
   if (url) {
