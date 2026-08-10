@@ -153,18 +153,38 @@ FE: `desktop/tm30-helper` deleted and committed (`5d431a3a`, `--no-verify` — t
 hook runs `next build`, red on `dev` because `recharts@^3.10.1` is in `package.json` but in neither
 the lockfile nor `node_modules`; proven pre-existing on a stashed clean tree). **Not pushed.**
 
+## FIND-1 — CLOSED, by someone else, 2026-08-10
+
+`origin/dev` moved 6 commits while this branch was in flight. `64141d5e feat(tm30): send
+`min_helper_version` on the deep link` and `0a278562 feat(tm30): negotiated v2/v3 deep link` add
+exactly the exports the seam suite was missing. Verified after rebasing: `./test/run.sh` **33/33**
+and `node --test test/*.test.mjs` **73/73**, up from 20/33 and 57/70. Layer 2 is live in production
+and v3 is emitted. Nothing here was needed for it.
+
+`82111d1e fix(tm30-helper page): stop promising an update signal that does not exist` also rewrote
+§Updating to state Windows and macOS apart — which was the last of the handoff's §6 doc items.
+
+## Shipped to `mo-reservation-fe` (branch `dev`, pushed)
+
+- `91f51284` — the vendored `desktop/tm30-helper` deletion.
+- `bb9475c0` — the `xattr` fix. Two defects in one line, both proven on this machine:
+  `/usr/local/bin/xattr` (pip) shadows Apple's and rejects `-r`, printing its usage on **stdout**
+  so the existing `2>/dev/null` does not even hide it; and the step sits in an `&&` chain, so its
+  non-zero exit aborts everything after it — the app lands in `/Applications` and is never opened.
+  Now `/usr/bin/xattr … || true`, wrapped in a group. Reproduced the break, verified the fix, and
+  verified it still continues with the binary missing entirely.
+  Both committed `--no-verify`: the pre-commit hook's `next build` is red on `dev` because
+  `recharts@^3.10.1` is declared but is in neither the lockfile nor `node_modules`. `next lint` and
+  `tsc` on the changed file are clean.
+
 ## Open, not done
 
-- **FIND-1 stands** — the web emitter never sends `min_helper_version`, so Layer 2 is dead in
-  production, and v3 is never emitted. Different repo, untouched.
-- **`xattr -dr` in `MAC_INSTALL_CMD` is fragile.** On this machine `/usr/local/bin/xattr` (a Python
-  one) shadows `/usr/bin/xattr` and rejects `-r`. The command joins that step with `&&`, so on any
-  operator with such a PATH the chain dies before `open` — the app installs and never launches, in
-  silence. One-word fix in `page.tsx`: `/usr/bin/xattr`. Not applied.
-- The FE deletion commit is local only.
+- **`recharts` is missing from `pnpm-lock.yaml` on `dev`** — `next build` fails, so the pre-commit
+  hook blocks every commit in that repo. Untouched: fixing it rewrites the lockfile, which is a
+  change of its own.
 - `/Applications/TM30 Helper.app` is a **locally built, unreleased 2.3.3**. Reinstall from the
   2.3.4 release to get back on a published build.
-- `dist/` holds the local build output.
+- `dist/` holds ~595 MB of local build output (gitignored).
 
 ## Next action
 
