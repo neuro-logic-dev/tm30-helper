@@ -29,6 +29,8 @@ if (process.defaultApp) {
 // Формат: tm30://open?d=<base64url(JSON)>
 //   v1: {name, login, pass}          — legacy, поведение не менялось
 //   v2: {v:2, worklist:[...]}        — MO-TM30-014 §7.3
+//   v3: {v:3, rows:[...], villas, *_base} — ADR-0015, the compact shape. Normalised to the
+//       SAME rows by deeplink.js, so nothing below this line can tell the two apart.
 // Сам парсер живёт в ./deeplink.js — без зависимости от electron, чтобы его
 // можно было прогонять тестом вместе с эмиттером (test/roundtrip.test.mjs).
 
@@ -135,7 +137,7 @@ function handleDeepLink(url) {
     case DeepLinkKind.V2: {
       const withCreds = result.worklist.filter((r) => r.account).length;
       console.log(
-        `[tm30-helper] deep link v2: ${result.worklist.length} filing(s), ` +
+        `[tm30-helper] deep link v${result.payload_version}: ${result.worklist.length} filing(s), ` +
           `${withCreds} with credentials, ${result.worklist.length - withCreds} manual-login` +
           (result.focus_filing_id !== undefined ? `, focus filing #${result.focus_filing_id}` : '')
       );

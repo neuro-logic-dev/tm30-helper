@@ -74,6 +74,14 @@
         --overdue: #b91c1c; --overdue-bg: #fef2f2;
         --ok: #166534; --ok-bg: #f0fdf4;
         --blocked: #475569; --blocked-bg: #f1f5f9;
+        /*
+          ADR-0014 — the quietest state in the pane. Every FILL is already spoken for: amber owed
+          today, red late, gold you-have-the-file, green done, solid slate blocked. `upcoming` is
+          neither a task nor a blockage, so it takes no fill at all — a ring, the treatment
+          `b-await` established, in a neutral. Both values come from the slate ramp already in
+          use, so no new hue enters the palette. Approved at the DD-4 mock gate.
+        */
+        --upcoming: #64748b; --upcoming-line: #cbd5e1;
 
         /*
          * The system stack, deliberately. The web app's Inter and JetBrains Mono are not
@@ -185,6 +193,7 @@
       .row.s-over { border-left-color: var(--overdue); }
       .row.s-block { border-left-color: var(--blocked); opacity: 0.75; }
       .row.s-await { border-left-color: var(--ok); border-left-style: dashed; }
+      .row.s-up { border-left-color: var(--upcoming-line); }
 
       .row-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       /*
@@ -214,6 +223,9 @@
       .badge.b-over { background: var(--overdue-bg); color: var(--overdue); }
       .badge.b-block { background: var(--blocked-bg); color: var(--blocked); }
       .badge.b-await { background: transparent; color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
+      /* A ring, NOT a fill — see the token comment. It must never be mistaken for `b-block`,
+         which is the opposite message: that one means something upstream is unfinished. */
+      .badge.b-up { background: transparent; color: var(--upcoming); box-shadow: inset 0 0 0 1px var(--upcoming-line); }
 
       /*
         Row action bar — ONE fixed slot order for every state: status · insert · xlsx · folder.
@@ -818,7 +830,6 @@
       //     REAL browser and stops there; the web tab records it (005 §8.4).
       // ═══════════════════════════════════════════════════════════════════════════════════
 
-      var POSTPONED_AFTER_MS = 24 * 60 * 60 * 1000;
       var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -871,6 +882,7 @@
         awaiting:   { row: 's-await', badge: 'b-await', label: 'awaiting approval' },
         approved:   { row: 's-sub',   badge: 'b-sub',   label: 'approved' },
         overdue:    { row: 's-over',  badge: 'b-over',  label: 'overdue' },
+        upcoming:   { row: 's-up',    badge: 'b-up',    label: 'upcoming' },
         nosheet:    { row: 's-block', badge: 'b-block', label: 'no sheet yet' },
       };
 
@@ -884,13 +896,23 @@
        * simply what to do next. The session is still per-villa; it just stopped choosing the
        * order.
        */
+      /*
+        🔴 ADR-0014 — RANKED ON THE DOT, and on nothing else.
+        This used to read the calendar a second time: `dot === 'due' && isToday(checkin)` for
+        rank 1, then `isPostponed(row)` — a 24h window measured off `checkin` — to split ranks 2
+        and 3. Both existed for ONE reason: the server could only say `due` or `overdue`, and
+        `due` meant "not overdue", so the Helper had to work out for itself whether "not overdue"
+        meant today or next week. That second reading is exactly how a row came to print a
+        22 August check-in under an `overdue` badge.
+        With `upcoming` on the wire, the server answers the question outright, and the ranks map
+        1:1 onto its three words. `isToday`/`isPostponed`/`POSTPONED_AFTER_MS` are gone with it.
+      */
       function priorityRank(row) {
         var kind = rowState(row);
-        if (isFinishedState(kind)) return 4;      // nothing left to do — sinks to the bottom
+        if (isFinishedState(kind)) return 3;      // nothing left to do — sinks to the bottom
         if (row.dot === 'overdue') return 0;
-        if (row.dot === 'due' && isToday(row.checkin)) return 1;
-        if (!isPostponed(row)) return 2;          // inside the 24h window
-        return 3;                                 // later
+        if (row.dot === 'due') return 1;          // owed TODAY — `due` now means exactly that
+        return 2;                                 // upcoming, or a row with no dot at all
       }
 
       /** The worklist in the order it should be worked: rank first, then soonest check-in. */
@@ -933,33 +955,14 @@
         return DAY_NAMES[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTH_NAMES[d.getUTCMonth()];
       }
 
-      /**
-       * Is this check-in the CURRENT day? Compared in UTC on both sides, because the check-in
-       * is a UTC-midnight `DATEONLY` (A-BE-5 finding #2) — mixing a UTC date against a local
-       * one is how a row lands on the wrong day either side of midnight. Uses the same
-       * captured `state.renderNow`, so it is a snapshot like everything else here, not a clock.
-       */
-      function isToday(checkin) {
-        var ms = checkinDayMs(checkin);
-        if (ms === null) return false;
-        var now = new Date(state.renderNow);
-        return ms === Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-      }
-
-      /**
-       * Whether a row sits beyond the 24h horizon. **Per ROW, not per villa** — AMB-1
-       * (2026-07-20): a villa's postponed filing is never promoted just because a sibling is
-       * urgent. Now that the list is flat this feeds `priorityRank` rather than choosing a
-       * container, but the per-row rule is the same one and must stay per-row.
-       *
-       * The boundary is the check-in (014 §7.1 Q2), measured against `state.renderNow` — an
-       * instant captured ONCE, never a ticking clock.
-       */
-      function isPostponed(row) {
-        var ms = checkinDayMs(row.checkin);
-        if (ms === null) return false; // unusable check-in → keep it in front of the operator
-        return ms > state.renderNow + POSTPONED_AFTER_MS;
-      }
+      /*
+        ── DELETED by ADR-0014: `isToday`, `isPostponed`, `POSTPONED_AFTER_MS` ───────────────
+        All three existed to work out, client-side, what "not overdue" meant — because the
+        server had only two words for three situations. `priorityRank` and the "Due today" line
+        now read `row.dot` and nothing else, which restores 014 §7.3 defect 3 in full: the
+        Helper RENDERS urgency, it never computes it. `checkinDayMs` survives; it is a date
+        formatter for the row's own label, not a bucket predicate.
+      */
 
       /**
        * The row's display state. Precedence runs finished → blocked → local → urgency.
@@ -976,6 +979,9 @@
         if (!row.sheet_download_url) return 'nosheet';
         if (local && local.downloadPath) return 'downloaded';
         if (row.dot === 'overdue') return 'overdue';
+        // ADR-0014. Kept BELOW the local `downloaded` check, exactly as `overdue` is: having the
+        // file on this machine is the more actionable fact whatever the deadline says.
+        if (row.dot === 'upcoming') return 'upcoming';
         return 'need';
       }
 
@@ -1283,18 +1289,16 @@
         /**
          * The server's dot, rendered as-is — the ONLY urgency signal on the row.
          *
-         * ⚠️ `dot: 'due'` means "not overdue", NOT "due today" (`getTm30DotState` /
-         * `Tm30SubmissionStatus`). Printing "Due today" on every non-overdue row labelled a
-         * check-in four days out as due today — caught rendering the postponed bucket. So the
-         * words are chosen by the calendar day, while the STATE is still the server's alone:
-         * `overdue` always shows, `due` shows "Due today" only on a row that really is today,
-         * and otherwise the date stands by itself (which is what the mockup draws for the
-         * postponed rows). This is label formatting, not a re-derived dot.
+         * ✅ ADR-0014 — `dot: 'due'` now means "due TODAY", not merely "not overdue".
+         * It used to mean the latter, so printing "Due today" on it labelled a check-in four
+         * days out as due today, and the fix at the time was to re-read the calendar here
+         * (`&& isToday(row.checkin)`). With `upcoming` split off on the server, the dot answers
+         * the question by itself and that second reading is deleted: one source of urgency again.
          */
         // `overdue` is NOT restated here: the badge on this same line already says it, and it
         // said it twice, in two different weights, four words apart. "Due today" stays — the
         // badge speaks about the sheet, this speaks about the clock, and they can disagree.
-        if (row.dot === 'due' && isToday(row.checkin)) {
+        if (row.dot === 'due') {
           when.appendChild(document.createTextNode(' · '));
           var due = document.createElement('span');
           due.className = 'due';
@@ -1565,8 +1569,21 @@
         }
         var open = rows.filter(function (r) { return !isFinishedState(rowState(r)); });
         var late = open.filter(function (r) { return r.dot === 'overdue'; }).length;
-        el.count.textContent =
-          open.length + ' to file' + (late ? ' \u00b7 ' + late + ' overdue' : '');
+        /*
+          🔴 ADR-0014 — "to file" counts what is OWED, not what is present.
+          An upcoming filing is work that exists, not work the operator can be behind on, so
+          counting it here would put a number in the header that nothing on screen can clear —
+          the same class of defect as a badge that disagrees with its own row. It is reported
+          separately, and only when there is any.
+          This mirrors the server, where `toSubmitDue`/`toSubmitOverdue` count neither.
+        */
+        var soon = open.filter(function (r) { return r.dot === 'upcoming'; }).length;
+        var owed = open.length - soon;
+        var parts = [];
+        parts.push(owed ? owed + ' to file' : 'nothing due');
+        if (late) parts.push(late + ' overdue');
+        if (soon) parts.push(soon + ' upcoming');
+        el.count.textContent = parts.join(' \u00b7 ');
       }
 
       // ── status line (mockup H8) ────────────────────────────────────────────────────────
