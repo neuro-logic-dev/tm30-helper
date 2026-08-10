@@ -242,21 +242,49 @@ test('🔴 the update strip has a rule that actually honours the hidden attribut
     );
 });
 
-test('every element carrying `hidden` that sets its own display has such a rule', () => {
-    // Generalised, so the next element of this shape cannot repeat the mistake.
-    const hiddenIds = [...src.matchAll(/<(\w+)[^>]*\bid="([\w-]+)"[^>]*\bhidden\b/g)].map(
+/**
+ * Generalised, so the next element of this shape cannot repeat the mistake.
+ *
+ * Factored out of the test because the strip now lives in TWO windows: the worklist pane and —
+ * ADR-0001 — the standalone window an operator reaches from the Dock. One of them being guarded
+ * and the other not is precisely how this bug would come back.
+ */
+function assertHiddenRules(markup, file) {
+    const hiddenIds = [...markup.matchAll(/<(\w+)[^>]*\bid="([\w-]+)"[^>]*\bhidden\b/g)].map(
         (m) => m[2],
     );
-    assert.ok(hiddenIds.length > 0, 'expected at least one hidden element in the markup');
+    assert.ok(hiddenIds.length > 0, `expected at least one hidden element in ${file}`);
     for (const id of hiddenIds) {
-        const el = new RegExp(`<\\w+[^>]*id="${id}"[^>]*>`).exec(src)?.[0] ?? '';
+        const el = new RegExp(`<\\w+[^>]*id="${id}"[^>]*>`).exec(markup)?.[0] ?? '';
         const cls = /class="([\w -]+)"/.exec(el)?.[1]?.split(/\s+/)[0];
         if (!cls) continue; // no class ⇒ no custom display ⇒ the attribute works by itself
-        if (!new RegExp(`\\.${cls}\\s*\\{[^}]*display:`).test(src)) continue;
+        if (!new RegExp(`\\.${cls}\\s*\\{[^}]*display:`).test(markup)) continue;
         assert.match(
-            src,
+            markup,
             new RegExp(`\\.${cls}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`),
-            `.${cls} sets display and #${id} carries [hidden] — it needs a [hidden] rule`,
+            `${file}: .${cls} sets display and #${id} carries [hidden] — it needs a [hidden] rule`,
         );
     }
+}
+
+test('every element carrying `hidden` that sets its own display has such a rule', () => {
+    assertHiddenRules(src, 'app.html');
+});
+
+/**
+ * ADR-0001 — the standalone window carries the same strip, and therefore the same trap: its
+ * `.updbar` sets `display: flex` and the element is born `hidden`. Without its own rule it would
+ * ship exactly the empty "TM30 Helper  is available — you are running ." that 2.3.2 fixed here.
+ *
+ * The wording is asserted alongside it: two windows showing the same fact in two different
+ * sentences is a thing an operator has to learn twice.
+ */
+test('🔴 the standalone window\'s strip hides itself, and says the same sentence', () => {
+    const standalone = fs.readFileSync(path.join(here, '..', 'index.html'), 'utf8');
+    assertHiddenRules(standalone, 'index.html');
+    assert.match(
+        standalone,
+        /TM30 Helper <b id="updver"><\/b> is available — you are running <b id="updcur"><\/b>\./,
+        'index.html must state the update in the same words as app.html',
+    );
 });
