@@ -5,7 +5,9 @@
  * shows the new row exactly as the old row: no booking reference, no check-out. This one carries
  * both, plus every state the pane can draw, so the whole surface is on screen at once:
  *
- *   · overdue, due-today, inside-24h and postponed rows, so the priority ranking is visible
+ *   · overdue, due-today and upcoming rows, so the priority ranking is visible. The future rows
+ *     carried `dot: 'due'` until ADR-0014 — the very "due means not-overdue" conflation this
+ *     feature removed, sitting in the demo data all along.
  *   · a row with no sheet yet (nosheet) and one already submitted (awaiting)
  *   · one villa WITH credentials, one WITHOUT — the two session-bar states you can reach
  *     without solving a captcha (the third, "session open", needs a real login)
@@ -47,15 +49,15 @@ const worklist = [
   // Villa Suriyan 2 — has credentials, so its rows render LOCKED until you log in.
   row({ id: 101, villa: 'Villa Suriyan 2', in: -2, out: 3, dot: 'overdue', account: SURIYAN }),
   row({ id: 102, villa: 'Villa Suriyan 2', in: 0, out: 4, dot: 'due', account: SURIYAN }),
-  row({ id: 103, villa: 'Villa Suriyan 2', in: 1, out: 6, dot: 'due', noSheet: true, account: SURIYAN }),
+  row({ id: 103, villa: 'Villa Suriyan 2', in: 1, out: 6, dot: 'upcoming', noSheet: true, account: SURIYAN }),
   // Villa Anda — also credentialled, and one of its filings is already submitted.
   row({ id: 104, villa: 'Villa Anda', in: 0, out: 5, dot: 'due', account: ANDA }),
   row({ id: 105, villa: 'Villa Anda', in: -1, out: 4, dot: 'due', status: 'submitted', account: ANDA }),
   // Villa Baan Ork — NO credentials. The daily case, not an error: manual login.
-  row({ id: 106, villa: 'Villa Baan Ork', in: 1, out: 5, dot: 'due' }),
+  row({ id: 106, villa: 'Villa Baan Ork', in: 1, out: 5, dot: 'upcoming' }),
   // Postponed: beyond the 24h horizon, so these sink to the bottom instead of hiding in a group.
-  row({ id: 107, villa: 'Villa Chai Talay', in: 3, out: 8, dot: 'due' }),
-  row({ id: 108, villa: 'Villa Chai Talay', in: 5, out: 9, dot: 'due', noSheet: true }),
+  row({ id: 107, villa: 'Villa Chai Talay', in: 3, out: 8, dot: 'upcoming' }),
+  row({ id: 108, villa: 'Villa Chai Talay', in: 5, out: 9, dot: 'upcoming', noSheet: true }),
 ];
 
 const b64url = Buffer.from(JSON.stringify({ v: 2, worklist }), 'utf8')
