@@ -46,6 +46,12 @@ download an update it then fails to install, on every check, forever. With no fe
 
 ## Turning macOS auto-update on, when the certificate exists
 
+> **This is a recipe, not a plan.** 2026-08-10, ADR-0001: the decision is that macOS stays
+> unsigned and installed by hand, and that the Helper never replaces itself while running. What
+> closes the gap instead is the "a newer release exists" strip — now shown in the standalone
+> window too, not only in a worklist opened from a deep link. Do not start any of the steps below
+> without a new ADR superseding 0001.
+
 1. Apple Developer Program membership → **Developer ID Application** certificate, exported
    as `.p12`.
 2. Repository secrets: `CSC_LINK` (base64 of the .p12), `CSC_KEY_PASSWORD`, `APPLE_ID`,

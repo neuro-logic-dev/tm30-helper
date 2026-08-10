@@ -19,9 +19,11 @@
     background: var(--bg);
     color: var(--text);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
   }
+  /* The card keeps its centred position; the strip, when it appears, takes the top edge
+     instead of pushing the card off-centre. */
+  .center { flex: 1; display: flex; align-items: center; justify-content: center; }
   main {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -33,21 +35,100 @@
   h1 { margin: 0 0 12px; font-size: 20px; }
   p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
   .version { margin-top: 20px; font-size: 12px; }
+
+  /* ADR-0001 — the same strip `app.html` shows, in the window an operator reaches from the
+     Dock. Deliberately identical in wording and colour: one notice, two places, so nobody has
+     to learn it twice. Dismissible for this window only — the reason it appeared has not gone
+     away just because someone closed it. */
+  .updbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    background: #fffbeb;
+    border-bottom: 1px solid #92400e;
+    color: #92400e;
+    font-size: 12px;
+    flex: 0 0 auto;
+  }
+  .updbar[hidden] { display: none; }
+  .updbar .grow { flex: 1; }
+  .updbar b { font-weight: 600; }
+  .updbar a, .updbar button {
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 550;
+    padding: 4px 9px;
+    border-radius: 6px;
+    border: 1px solid #92400e;
+    background: transparent;
+    color: #92400e;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .updbar a:hover, .updbar button:hover { background: #92400e; color: #fff; }
+  .updbar .dismiss { border-color: transparent; font-weight: 500; opacity: 0.8; }
+  .updbar .dismiss:hover { background: transparent; color: #92400e; opacity: 1; }
 </style>
 </head>
 <body>
 
-<main>
-  <h1>TM30 Helper</h1>
-  <p>This app is launched from the dashboard: press the TM30 button there to open your filing queue.</p>
-  <p class="version" id="version"></p>
-</main>
+<!-- ADR-0001's strip. Stays hidden until main.js calls `showUpdateNotice` — see the script. -->
+<div class="updbar" id="updbar" hidden>
+  <span class="grow">Update available: <b id="updver"></b> — you are running <b id="updcur"></b>.</span>
+  <a id="updopen" target="_blank" rel="noreferrer" hidden>Open install page</a>
+  <button type="button" class="dismiss" id="upddismiss">Not now</button>
+</div>
+
+<div class="center">
+  <main>
+    <h1>TM30 Helper</h1>
+    <p>This app is launched from the dashboard: press the TM30 button there to open your filing queue.</p>
+    <p class="version" id="version"></p>
+  </main>
+</div>
 
 <script>
-  // Fed by main.js from app.getVersion() — never hard-code it here: the app
-  // updates itself, and a literal would start lying the first time it does.
+  // Fed by main.js from app.getVersion() — never hard-code it here: the app changes its own
+  // version (Windows updates itself; macOS is reinstalled over the top), and a literal would
+  // start lying the first time it does.
   const v = new URLSearchParams(location.search).get("v");
   document.getElementById("version").textContent = v ? "Version " + v : "";
+
+  /**
+   * ADR-0001 / spec C-2 — main.js calls this, once it knows, via `executeJavaScript`.
+   *
+   * It cannot be a query parameter: this window is opened on the line after the version check
+   * starts, so at that moment the answer does not exist yet. This is a one-way seam — nothing
+   * here can call back into main, and the only URL it will ever open is the one handed in.
+   *
+   * `install` may be null: the install page's origin is derived from the web app that sent us,
+   * and an operator who has never opened a filing queue has never told us one. The warning is
+   * worth more than the button, so the strip still appears — just without it.
+   *
+   * Idempotent: main pushes on `did-finish-load` AND when the check resolves, and whichever
+   * lands second must not undo a dismissal or double-render.
+   */
+  window.showUpdateNotice = function (notice) {
+    const bar = document.getElementById("updbar");
+    if (!notice || !notice.next || bar.dataset.shown) return;
+    bar.dataset.shown = "1";
+
+    document.getElementById("updver").textContent = notice.next;
+    document.getElementById("updcur").textContent = notice.cur || v || "";
+
+    if (notice.install) {
+      const link = document.getElementById("updopen");
+      link.href = notice.install;
+      link.hidden = false;
+    }
+    bar.hidden = false;
+  };
+
+  document.getElementById("upddismiss").addEventListener("click", function () {
+    document.getElementById("updbar").hidden = true;
+  });
 </script>
 
 </body>

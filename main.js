@@ -55,6 +55,12 @@ function openAccountWindow(acc) {
   win.focus();
 }
 
+/**
+ * Every standalone window currently open. Tracked because the update verdict arrives AFTER the
+ * window does (see `broadcastUpdateNotice`), so main has to be able to find it again.
+ */
+const standaloneWindows = new Set();
+
 function openStandaloneWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -62,9 +68,54 @@ function openStandaloneWindow() {
     title: 'TM30 Helper',
     webPreferences: { webviewTag: true },
   });
-  // Версия уезжает в query, а не вшита в разметку: с автообновлением приложение
-  // меняет версию само, и жёстко прописанная строка на экране начинает врать.
+  // Версия уезжает в query, а не вшита в разметку: приложение меняет версию само
+  // (на Windows — автообновлением, на macOS — переустановкой поверх), и жёстко
+  // прописанная строка на экране начинает врать.
   win.loadFile('index.html', { query: { v: app.getVersion() } });
+
+  // ADR-0001 / spec C-1. `index.html` is a v1 window and deliberately has NO preload (013 §3.5),
+  // so it cannot reach `shell` the way `app.html` does. The install-page link is therefore a
+  // plain `<a target="_blank">`, and this is the seam that hands it to the real browser and
+  // refuses the in-window navigation. The renderer gains no verb it could call with anything
+  // else — the only URL it can produce here is the one main gave it.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isHttpUrl(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  standaloneWindows.add(win);
+  win.on('closed', () => standaloneWindows.delete(win));
+  // The other half of the race: the check may already have answered before this window loaded.
+  win.webContents.on('did-finish-load', () => pushUpdateNotice(win));
+}
+
+/**
+ * ADR-0001 / spec C-2 — why this is pushed rather than passed in the query.
+ *
+ * `app.whenReady()` starts the version check (up to 3 s) and opens the window on the very next
+ * line. At a Dock launch the window is therefore painted while `latestKnownVersion` is still
+ * null, so a query parameter would be empty every single time and the operator would never be
+ * told. The verdict has to arrive after the window does.
+ *
+ * Main → renderer, one way. `index.html` has no preload and no `ipcRenderer`: it receives three
+ * strings and has no channel to answer on.
+ */
+function pushUpdateNotice(win) {
+  if (!latestKnownVersion || !win || win.isDestroyed()) return;
+  const notice = JSON.stringify({
+    next: latestKnownVersion,
+    cur: app.getVersion(),
+    install: installPageUrl,
+  });
+  win.webContents
+    .executeJavaScript(`window.showUpdateNotice && window.showUpdateNotice(${notice})`)
+    .catch(() => {
+      /* the window went away mid-flight — nothing to tell anyone */
+    });
+}
+
+function broadcastUpdateNotice() {
+  for (const win of standaloneWindows) pushUpdateNotice(win);
 }
 
 /**
@@ -128,6 +179,61 @@ async function checkForNewerRelease() {
 }
 
 /**
+ * ADR-0001 — where the install page lives, remembered across launches.
+ *
+ * The origin is NEVER hardcoded: it is the origin of the web app that sent us, taken from a
+ * worklist row's `return_url`, so an operator on a staging deployment is sent to the staging
+ * install page. That derivation needs a worklist — and the standalone window (Dock launch) has
+ * none. So the last origin a deep link taught us is written to disk and reused there.
+ *
+ * `{userData}` already holds per-filing sheets ({userData}/tm30-sheets/), so this adds no new
+ * storage location. Never having seen an origin is a SUPPORTED state, not an error: the notice
+ * then shows without its button, exactly as `refusedForVersion` already degrades.
+ */
+const STATE_FILENAME = 'tm30-state.json';
+
+/** The install page URL, or null while unknown. */
+let installPageUrl = null;
+
+function stateFilePath() {
+  return path.join(app.getPath('userData'), STATE_FILENAME);
+}
+
+/** `https://app.example.com/tm30/...` → `https://app.example.com/tm30-helper`, or null. */
+function deriveInstallPage(worklist) {
+  try {
+    const withReturn = (worklist || []).find((r) => r && r.return_url);
+    if (!withReturn) return null;
+    return new URL(withReturn.return_url).origin + '/tm30-helper';
+  } catch {
+    /* an unusable return_url costs the button, not the warning */
+    return null;
+  }
+}
+
+function loadInstallPage() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(stateFilePath(), 'utf8'));
+    if (isHttpUrl(parsed && parsed.install_url)) installPageUrl = parsed.install_url;
+  } catch {
+    /* first launch, or the file was hand-edited into nonsense — either way, no origin yet */
+  }
+}
+
+/** Called for every v2 link, refused or not: a refused link still teaches us where to send them. */
+function rememberInstallPage(worklist) {
+  const url = deriveInstallPage(worklist);
+  if (!url || url === installPageUrl) return;
+  installPageUrl = url;
+  try {
+    fs.writeFileSync(stateFilePath(), JSON.stringify({ install_url: url }) + '\n', 'utf8');
+  } catch (e) {
+    // Losing the memo costs the button on a LATER Dock launch and nothing in this session.
+    console.log('[tm30-helper] could not remember the install page:', (e && e.message) || e);
+  }
+}
+
+/**
  * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the per-link floor. BLOCKING.
  *
  * Needs no network, which is the point: it answers "can this Helper honour THIS link" from the
@@ -145,13 +251,7 @@ function refusedForVersion(result, url) {
   if (!floor) return false;
   if (compareVersions(app.getVersion(), floor) !== -1) return false;
 
-  let installUrl = null;
-  try {
-    const withReturn = result.worklist.find((r) => r.return_url);
-    if (withReturn) installUrl = new URL(withReturn.return_url).origin + '/tm30-helper';
-  } catch {
-    /* an unusable return_url costs the button, not the warning */
-  }
+  const installUrl = deriveInstallPage(result.worklist);
 
   console.error(
     `[tm30-helper] REFUSED: link needs >= ${floor}, this is ${app.getVersion()}\n  url: ${url}`
@@ -240,6 +340,9 @@ function handleDeepLink(url) {
           `${withCreds} with credentials, ${result.worklist.length - withCreds} manual-login` +
           (result.focus_filing_id !== undefined ? `, focus filing #${result.focus_filing_id}` : '')
       );
+      // BEFORE the gate: a link we are about to refuse still tells us where the install page is,
+      // and that is precisely the operator who will need it from a Dock launch afterwards.
+      rememberInstallPage(result.worklist);
       // Layer 2 gate — BEFORE the window. A refused link opens nothing at all.
       if (refusedForVersion(result, url)) return;
       openWorklistWindow(result.worklist, result.focus_filing_id);
@@ -401,8 +504,14 @@ ipcMain.handle('tm30:open-external', async (_event, rawUrl) => {
 
 // ---------- Автообновление ----------
 /**
- * Помощник обновляет себя сам, молча. Ничего не спрашиваем и ничего не показываем:
- * человек открывает его, чтобы подать TM30, а не чтобы обслуживать приложение.
+ * На Windows помощник обновляет себя сам, молча. Ничего не спрашиваем и ничего не
+ * показываем: человек открывает его, чтобы подать TM30, а не чтобы обслуживать
+ * приложение.
+ *
+ * 🔴 На macOS этот механизм НЕ РАБОТАЕТ и работать не будет — ADR-0001: подписи нет,
+ * mac-фид не публикуется, самозамену мы делать отказались. Там роль обновления играет
+ * Layer 1 выше: полоска «есть версия новее» + ссылка на страницу установки, в окне
+ * worklist'а и в standalone-окне. Всё, что ниже, — про Windows.
  *
  * Как это ложится на жизненный цикл: на Windows приложение выходит, как только
  * закрыто последнее окно (см. `window-all-closed` ниже), то есть живёт от одной
@@ -474,9 +583,11 @@ app.on('second-instance', (_event, argv) => {
 
 app.whenReady().then(() => {
   initAutoUpdate();
+  loadInstallPage();
   // Layer 1 — fire and forget. Never awaited: a slow or unreachable GitHub must not delay the
-  // window an operator is waiting for. Its answer is read when a window opens, or not at all.
-  void checkForNewerRelease();
+  // window an operator is waiting for. Its answer is read when a v2 window opens, and pushed
+  // into any standalone window that is already up — which, at a Dock launch, is all of them.
+  void checkForNewerRelease().then(broadcastUpdateNotice);
 
   const url = pendingLink || findDeepLinkInArgv(process.argv);
   if (url) {

@@ -1,3 +1,15 @@
+> # ⛔ SUPERSEDED — 2026-08-10, by `.orchestrator/decisions/0001-no-apple-signing-no-self-replacement.md`
+>
+> The decision was **neither** Option C nor Option D. macOS stays unsigned and installed by hand;
+> the Helper will not replace itself while running. What shipped instead: the "a newer release
+> exists" notice now also appears in the standalone (Dock-launched) window, which is where an
+> operator was previously told nothing at all.
+>
+> Kept for its reasoning and its evidence table. **Three of its factual claims are wrong** — see
+> the "Handoff corrections" table in `.orchestrator/STATE.md` before acting on anything below:
+> there is no v2.3.2, there is no "Restart & update now" button on any platform, and none of the
+> `tm30:update-state` / `tm30:quit-and-install` / `#updinstall` symbols §5 maps exist in this repo.
+
 # HANDOFF — macOS self-update for the TM30 Helper
 
 Branch: `feat/macos-self-update` · Base: `main` @ 2.3.2 · Written 2026-08-10
