@@ -59,6 +59,31 @@ const fail = (reason) => ({ kind: DeepLinkKind.ERROR, reason });
  */
 const DOT_VALUES = new Set(['due', 'overdue', 'upcoming']);
 
+/**
+ * Compare two `x.y.z` versions. `-1 | 0 | 1`, and `null` when either side is not a bare triple.
+ *
+ * 🔴 Deliberately strict, and `null` is the honest answer rather than a guess: a version we
+ * cannot parse must never be treated as "old enough to block" — a malformed floor would lock an
+ * operator out of their own queue over a typo in a payload field. Every caller treats `null` as
+ * "no opinion" and lets the work through.
+ *
+ * No semver library: this file is required by `main.js` at startup and has ZERO dependencies by
+ * design. Pre-release tags are not used by this project's releases and are not supported.
+ */
+function compareVersions(a, b) {
+    const parse = (v) => {
+        const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(v == null ? '' : v).trim());
+        return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    };
+    const pa = parse(a);
+    const pb = parse(b);
+    if (!pa || !pb) return null;
+    for (let i = 0; i < 3; i += 1) {
+        if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+    }
+    return 0;
+}
+
 /** @internal `https://x/` → `https://x`. A base joined with `/path` must not produce `//path`. */
 const trimSlashes = (s) => String(s).replace(/\/+$/, '');
 
@@ -350,6 +375,24 @@ function parseDeepLink(url) {
         const result = { kind: DeepLinkKind.V2, worklist, payload_version: payload.v };
 
         /**
+         * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
+         *
+         * Expresses what Layer 1's "is there a newer release" cannot: *this particular link
+         * requires ≥ X*. That is the honest signal when the web app has just started sending a
+         * field an older Helper would silently drop — the failure mode §1 of that spec is
+         * entirely about (`focus_filing_id` did exactly this to pre-T3-03 Helpers).
+         *
+         * Carried through as data only. The COMPARISON and the block live in `main.js`, because
+         * this module is pure and testable and must not own a dialog. Tolerant like
+         * `focus_filing_id`: a junk value leaves the key off rather than failing the link, since
+         * a malformed floor must not be a reason to refuse work.
+         */
+        if (typeof payload.min_helper_version === 'string' &&
+            /^\d+\.\d+\.\d+$/.test(payload.min_helper_version.trim())) {
+            result.min_helper_version = payload.min_helper_version.trim();
+        }
+
+        /**
          * T3-03: the OPTIONAL focus — the filing the window boots pre-selected on. Tolerant
          * BY DESIGN, unlike the row checks above: focus is an enhancement on top of a payload
          * that is otherwise fully usable, so an absent or junk value degrades to "no focus"
@@ -377,4 +420,4 @@ function parseDeepLink(url) {
     return fail('link payload is neither a v1 account nor a v2/v3 worklist');
 }
 
-module.exports = { parseDeepLink, DeepLinkKind, PROTOCOL, payloadDigest };
+module.exports = { parseDeepLink, DeepLinkKind, PROTOCOL, payloadDigest, compareVersions };
