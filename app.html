@@ -103,6 +103,45 @@
         background: var(--paper);
       }
 
+      /*
+        The update strip (MO-TM30-HELPER-VERSIONING §5 Layer 1). Amber, above BOTH panes, because
+        it is about the application rather than about any filing — putting it inside the worklist
+        would make it compete with the rows for the same glance.
+        Dismissible for the session only: the next launch asks again, because the reason it
+        appeared has not gone away just because someone closed it.
+      */
+      .updbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 14px;
+        background: var(--due-bg);
+        border-bottom: 1px solid var(--due);
+        color: var(--due);
+        font-size: 12px;
+        flex: 0 0 auto;
+      }
+      .updbar .grow { flex: 1; }
+      .updbar b { font-weight: 600; }
+      .updbar button {
+        font: inherit;
+        font-size: 11.5px;
+        font-weight: 550;
+        padding: 4px 9px;
+        border-radius: 6px;
+        border: 1px solid var(--due);
+        background: transparent;
+        color: var(--due);
+        cursor: pointer;
+      }
+      .updbar button:hover { background: var(--due); color: #fff; }
+      .updbar .dismiss { border-color: transparent; font-weight: 500; opacity: 0.8; }
+      .updbar .dismiss:hover { background: transparent; color: var(--due); opacity: 1; }
+
+      /* The strip sits ABOVE the panes, so the grid can no longer own the full height. */
+      body.has-updbar { display: flex; flex-direction: column; }
+      body.has-updbar .panes { flex: 1; min-height: 0; }
+
       /* ── the two panes (mockup H1: grid 360px 1fr) ───────────────────────────────────── */
       .panes {
         display: grid;
@@ -284,6 +323,18 @@
       .btn:hover:not([disabled]) { border-color: var(--faint); background: var(--surface-2); }
       .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
 
+      /*
+        Keyboard focus was invisible everywhere in this pane. The rows carry `role="button"` and
+        `tabindex="0"` and answer Enter/Space, and every control is a real <button> — so the pane
+        was fully operable by keyboard and gave no clue where you were. `:focus-visible` shows the
+        ring only for keyboard traversal, so a mouse click does not leave one behind.
+      */
+      .btn:focus-visible,
+      .row:focus-visible {
+        outline: 2px solid var(--accent-ink);
+        outline-offset: 2px;
+      }
+
       /* The one that completes the filing. Filled — nothing else on the row is. */
       .btn.primary {
         background: var(--primary);
@@ -292,7 +343,31 @@
         font-weight: 550;
       }
       .btn.primary svg { opacity: 1; }
-      .btn.primary:hover:not([disabled]) { filter: brightness(1.15); color: #fff; }
+      /*
+        🔴 BACKGROUND IS RESTATED HERE, and it is not redundant.
+        `.btn:hover:not([disabled])` above sets `background: var(--surface-2)` — near-white — for
+        every button. This rule is more specific, but specificity is per-PROPERTY: it used to
+        declare only `filter` and `color`, so the generic rule's near-white background still won,
+        under `.btn.primary`'s `color: #fff`. White on near-white: the primary action went blank
+        the moment the pointer touched it. Restating background + border-color pins it.
+      */
+      .btn.primary:hover:not([disabled]) {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+        filter: brightness(1.15);
+      }
+      /*
+        …and `.locked` has to say it again, for the mirror-image reason: it is `.btn.primary` too,
+        so without this it would inherit the dark fill above while keeping its own dark `--ink`
+        text. Dark on dark is the same bug wearing the other coat.
+      */
+      .btn.primary.locked:hover:not([disabled]) {
+        background: var(--surface-2);
+        border-color: var(--ink);
+        color: var(--ink);
+        filter: none;
+      }
       /*
         Not yet inviting, still obviously pressable: the villa has no portal session, so filing
         has not happened yet. It used to drop to a bare ghost here, which read as broken.
@@ -505,6 +580,14 @@
     </style>
   </head>
   <body>
+    <!-- Layer 1's strip. Rendered only when main.js passed `upd`; see `renderUpdateBar`. -->
+    <div class="updbar" id="updbar" hidden>
+      <span class="grow"
+        >Update available: <b id="updver"></b> — you are running <b id="updcur"></b>.</span
+      >
+      <button type="button" id="updopen">Open install page</button>
+      <button type="button" class="dismiss" id="upddismiss">Not now</button>
+    </div>
     <div class="panes">
       <!-- LEFT — the worklist container. 4d fills this with villa groups. -->
       <section class="pane-l" aria-label="Worklist">
@@ -633,12 +716,12 @@
          * sent to a backend status"). `{ downloadPath, downloadError, submitted }`.
          */
         rowLocal: Object.create(null),
-        /**
-         * 🔴 The bucket boundary, captured ONCE. 014 §2.1 / §7.1 Q2 / 007 GAP-6: NO countdown,
-         * NO live timer, ever. Every re-render (download, mark-submitted) reuses this instant,
-         * so a row can never migrate buckets while the operator is looking at it.
-         */
-        renderNow: 0,
+        /*
+          `renderNow` was here: a once-captured instant that stopped a row migrating buckets while
+          the operator read it. Its only readers were `isToday` and `isPostponed`, and ADR-0014
+          deleted both — the server now says which bucket a row is in, so there is no clock left
+          on this side to freeze. Removed rather than left as a field nothing reads.
+        */
         /** Transient status-line note, e.g. `sheet downloaded ✓`. */
         statusNote: null,
 
@@ -672,6 +755,11 @@
       var listeners = [];
 
       var el = {
+        updbar: document.getElementById('updbar'),
+        updver: document.getElementById('updver'),
+        updcur: document.getElementById('updcur'),
+        updopen: document.getElementById('updopen'),
+        upddismiss: document.getElementById('upddismiss'),
         list: document.getElementById('list'),
         count: document.getElementById('count'),
         statusline: document.getElementById('statusline'),
@@ -1517,10 +1605,6 @@
        * `state.villaSession` is NOT re-keyed per group — it stays villa-keyed (AMB-1).
        */
       function renderList() {
-        // The instant is captured ONCE, on the first render, and reused by every re-render.
-        // A row must never change bucket because the operator took a minute to read it.
-        if (!state.renderNow) state.renderNow = Date.now();
-
         el.list.textContent = '';
 
         if (!state.worklist.length) {
@@ -1584,6 +1668,45 @@
         if (late) parts.push(late + ' overdue');
         if (soon) parts.push(soon + ' upcoming');
         el.count.textContent = parts.join(' \u00b7 ');
+      }
+
+      /**
+       * MO-TM30-HELPER-VERSIONING §5 Layer 1 — paint the "newer release exists" strip.
+       *
+       * 🔴 The COMPARISON is not done here. `main.js` already decided, and passes `upd` only when
+       * it is both parseable and genuinely newer — so this function cannot disagree with the main
+       * process about whether an update exists, which is the same one-arbiter rule `row.dot`
+       * follows. No `upd` ⇒ no strip, and no version arithmetic on this side at all.
+       *
+       * The install page is opened through the existing `tm30:open-external` IPC — the one
+       * funnel every outward link already uses. Nothing new is granted to this renderer.
+       */
+      function renderUpdateBar() {
+        var params = new URLSearchParams(location.search);
+        var next = params.get('upd');
+        if (!next) return;
+
+        el.updver.textContent = next;
+        el.updcur.textContent = params.get('cur') || '';
+        el.updbar.hidden = false;
+        document.body.classList.add('has-updbar');
+
+        el.updopen.addEventListener('click', function () {
+          // Derived from the row the operator was sent here with, exactly as main.js derives it
+          // for the hard block — no origin is hardcoded in the renderer either.
+          var withReturn = (state.worklist || []).filter(function (r) { return r.return_url; })[0];
+          if (!withReturn || !window.tm30Native) return;
+          try {
+            window.tm30Native.openExternal(new URL(withReturn.return_url).origin + '/tm30-helper');
+          } catch (e) {
+            console.error('[tm30-helper] could not open the install page', e);
+          }
+        });
+
+        el.upddismiss.addEventListener('click', function () {
+          el.updbar.hidden = true;
+          document.body.classList.remove('has-updbar');
+        });
       }
 
       // ── status line (mockup H8) ────────────────────────────────────────────────────────
@@ -2624,7 +2747,6 @@
         }
         if (focusRow) {
           state.focusFilingId = payload.focus_filing_id;
-          if (!state.renderNow) state.renderNow = Date.now(); // the same captured instant renderList would take
           // A postponed focus row used to need the collapsed group expanded before it could be
           // seen. The list is flat now, so every row is already on screen and there is nothing
           // left to open — `.row.focused` and the scroll-into-view below do the rest.
@@ -2637,6 +2759,7 @@
       }
 
       renderList();
+      renderUpdateBar(); // before the list: the strip changes the body layout
       renderCount(); // reads `state.worklist` directly — no ordering dependency on renderList
       renderStatusLine();
       // 🔴 4g: mountPortal BEFORE mountAutofill — their `onActiveVillaChange` subscriptions run
