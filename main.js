@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
 
 const { autoUpdater } = require('electron-updater');
 
@@ -195,8 +196,58 @@ const STATE_FILENAME = 'tm30-state.json';
 /** The install page URL, or null while unknown. */
 let installPageUrl = null;
 
+/**
+ * ADR-0001 (version report) — WHERE to report this Helper's version, and who to say it is.
+ *
+ * Both are taught to us by a deep link and then remembered, for exactly the reason the install
+ * page above is: a Dock / Start-menu launch has no link and no worklist, and that is precisely
+ * the launch the dashboard needs to hear about. Null until some link has taught us is a
+ * SUPPORTED state, not an error — a Helper that has never been opened from the web reports
+ * nothing at all, silently (AC-14).
+ */
+let reportUrl = null;
+let reportToken = null;
+
 function stateFilePath() {
   return path.join(app.getPath('userData'), STATE_FILENAME);
+}
+
+/**
+ * The whole memo, read TOLERANTLY.
+ *
+ * A file written by 2.3.4 (only `install_url`) and a file written by some future build (keys
+ * this one has never heard of) both load, and both are just an object. Missing, unreadable,
+ * hand-edited into nonsense, or not an object at all ⇒ `{}`. Never an error, never a dialog:
+ * every caller below treats "we do not know" as a normal state.
+ */
+function readState() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(stateFilePath(), 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 🔴 A UNION write, never a replace.
+ *
+ * Until this file held one key, `rememberInstallPage` could rewrite the whole object and be
+ * right. With three facts and three independent writers, that same code silently drops
+ * `installation_id` the first time a new install page arrives — and a regenerated installation
+ * forks one machine into two rows on the backend. Unknown keys survive for the mirror-image
+ * reason: a memo written by a NEWER build must not be destroyed by an older one.
+ *
+ * Failing to write costs a button and a report on a LATER launch, and nothing in this session.
+ */
+function writeState(patch) {
+  const merged = { ...readState(), ...patch };
+  try {
+    fs.writeFileSync(stateFilePath(), JSON.stringify(merged) + '\n', 'utf8');
+  } catch (e) {
+    console.log(`[tm30-helper] could not write ${STATE_FILENAME}:`, (e && e.message) || e);
+  }
+  return merged;
 }
 
 /** `https://app.example.com/tm30/...` → `https://app.example.com/tm30-helper`, or null. */
@@ -212,12 +263,9 @@ function deriveInstallPage(worklist) {
 }
 
 function loadInstallPage() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(stateFilePath(), 'utf8'));
-    if (isHttpUrl(parsed && parsed.install_url)) installPageUrl = parsed.install_url;
-  } catch {
-    /* first launch, or the file was hand-edited into nonsense — either way, no origin yet */
-  }
+  /* first launch, or a hand-edited file — either way `readState` says `{}` and no origin yet */
+  const { install_url: url } = readState();
+  if (isHttpUrl(url)) installPageUrl = url;
 }
 
 /** Called for every v2 link, refused or not: a refused link still teaches us where to send them. */
@@ -225,11 +273,113 @@ function rememberInstallPage(worklist) {
   const url = deriveInstallPage(worklist);
   if (!url || url === installPageUrl) return;
   installPageUrl = url;
+  writeState({ install_url: url });
+}
+
+/**
+ * The reporting details as of the last link that carried them.
+ *
+ * `report_url` goes through the SAME `isHttpUrl` gate on the way OUT of the file as on the way
+ * in: `tm30-state.json` sits in a writable directory and this is a URL we are about to POST to.
+ * Read as a PAIR — a token with nowhere to go and an address with nobody to name are both just
+ * silence, and half-restored state would only make the silence harder to explain.
+ */
+function loadReportDetails() {
+  const state = readState();
+  if (isHttpUrl(state.report_url) && typeof state.report_token === 'string' && state.report_token) {
+    reportUrl = state.report_url;
+    reportToken = state.report_token;
+  }
+}
+
+/**
+ * AC-12 — a link that carries reporting details teaches them to disk, so that every FUTURE
+ * launch can report without a link. Called before the Layer-2 gate for the same reason
+ * `rememberInstallPage` is: an operator whose link was just refused for being too old is exactly
+ * the operator whose version the dashboard most needs to have heard.
+ *
+ * Junk cannot get in — and cannot cost anything either: bad details leave the Helper as silent
+ * as it was before the link arrived, and the filing opens regardless.
+ */
+function rememberReportDetails(result) {
+  const url = result && result.report_url;
+  const token = result && result.report_token;
+  if (!isHttpUrl(url) || typeof token !== 'string' || token === '') return;
+  if (url === reportUrl && token === reportToken) return; // already known — nothing to write
+  reportUrl = url;
+  reportToken = token;
+  writeState({ report_url: url, report_token: token });
+}
+
+/**
+ * This installation's identity: generated ONCE, on first need, and then never again.
+ *
+ * It is half of the backend's key (operator + installation), so a regenerated id forks one
+ * machine into two rows and makes "the latest observation" ambiguous — which is why it is read
+ * back from disk on every call rather than cached in a variable that a future edit could reset.
+ *
+ * Deliberately random and deliberately meaningless: it says "the same install as last time" and
+ * nothing whatsoever about the machine (AC-15). Nothing is derived from hostname, user or path.
+ */
+function ensureInstallationId() {
+  const existing = readState().installation_id;
+  if (typeof existing === 'string' && existing !== '') return existing;
+  const id = randomUUID();
+  writeState({ installation_id: id });
+  return id;
+}
+
+/**
+ * ADR-0001 — THE VERSION REPORT. `{version, platform}` and the token, to the address on disk.
+ *
+ * 🔴 Yes, this is shaped like `checkForNewerRelease()` above, and it stays that way. The two
+ * calls answer to different masters — GitHub's release feed versus our own report contract —
+ * and will change for different reasons; folding them into one `postQuietly()` would couple a
+ * timeout, a header set and an error policy that only look alike today. Duplicate until the
+ * third occurrence.
+ *
+ * WHAT IT MUST NEVER DO: block. Not the window, not a deep link, not a filing. One attempt, a
+ * hard 3-second abort, and a `catch` that cannot rethrow. A 404 (rotated secret, unknown token)
+ * is not retried and not surfaced — the next deep link brings fresh details and heals it.
+ *
+ * The "already sent" guard is per LAUNCH and keyed on what was actually sent, so the whenReady
+ * report and a deep link carrying the SAME details produce one POST rather than two, while a
+ * link carrying NEW details (the bootstrap case, and a rotated token) still reports at once. A
+ * failed attempt is never re-attempted with the same details: that would be a retry.
+ *
+ * The token is never logged. Nothing about a filing, a guest, a villa, an account, a path or a
+ * machine is sent — the body below is the entire contract.
+ */
+const REPORT_TIMEOUT_MS = 3000;
+
+/** `url|token` of the report already sent this launch, or null. */
+let reportedThisLaunch = null;
+
+async function reportVersion() {
+  if (!isHttpUrl(reportUrl) || !reportToken) return; // nobody ever told us where — stay silent
+  const attempt = `${reportUrl}|${reportToken}`;
+  if (attempt === reportedThisLaunch) return;
+  reportedThisLaunch = attempt;
+
   try {
-    fs.writeFileSync(stateFilePath(), JSON.stringify({ install_url: url }) + '\n', 'utf8');
+    const res = await fetch(reportUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: reportToken,
+        installation_id: ensureInstallationId(),
+        version: app.getVersion(),
+        platform: process.platform,
+      }),
+      signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
+    });
+    if (res.status === 204) {
+      console.log(`[tm30-helper] reported version ${app.getVersion()} (${process.platform})`);
+    } else {
+      console.log(`[tm30-helper] version report not stored: HTTP ${res.status}`);
+    }
   } catch (e) {
-    // Losing the memo costs the button on a LATER Dock launch and nothing in this session.
-    console.log('[tm30-helper] could not remember the install page:', (e && e.message) || e);
+    console.log('[tm30-helper] version report skipped:', (e && e.message) || e);
   }
 }
 
@@ -343,6 +493,11 @@ function handleDeepLink(url) {
       // BEFORE the gate: a link we are about to refuse still tells us where the install page is,
       // and that is precisely the operator who will need it from a Dock launch afterwards.
       rememberInstallPage(result.worklist);
+      // AC-12, and BEFORE the gate for the same reason: a Helper too old for this link is the
+      // one whose version the dashboard is trying to warn about. Never awaited — the report is
+      // incapable of delaying the gate, the window or the filing behind it.
+      rememberReportDetails(result);
+      void reportVersion();
       // Layer 2 gate — BEFORE the window. A refused link opens nothing at all.
       if (refusedForVersion(result, url)) return;
       openWorklistWindow(result.worklist, result.focus_filing_id);
@@ -584,10 +739,15 @@ app.on('second-instance', (_event, argv) => {
 app.whenReady().then(() => {
   initAutoUpdate();
   loadInstallPage();
+  loadReportDetails();
   // Layer 1 — fire and forget. Never awaited: a slow or unreachable GitHub must not delay the
   // window an operator is waiting for. Its answer is read when a v2 window opens, and pushed
   // into any standalone window that is already up — which, at a Dock launch, is all of them.
   void checkForNewerRelease().then(broadcastUpdateNotice);
+  // AC-11 — EVERY launch, Dock included, and on the same terms: started here, never awaited,
+  // and the very next line opens the window whatever it is doing. A launch that was never
+  // taught an address reports nothing and says nothing about it.
+  void reportVersion();
 
   const url = pendingLink || findDeepLinkInArgv(process.argv);
   if (url) {
@@ -605,3 +765,33 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) openStandaloneWindow();
 });
+
+/**
+ * 🔴 TEST SEAM — inert in production. `main.js` is the Electron ENTRYPOINT: nothing requires it,
+ * so this object is never constructed by anything the operator runs.
+ *
+ * It exists so `test/version-report.test.mjs` can drive the REAL memo and the REAL report rather
+ * than a re-typed copy of them. That is the same rule `deeplink.js` was extracted under, applied
+ * to code that genuinely cannot leave `main.js`: the memo needs `app.getPath('userData')` and
+ * the report needs `app.getVersion()`. A mirrored copy of a file format is exactly the drift
+ * `roundtrip.test.mjs` was written to catch — the thing under test must be the thing that ships.
+ *
+ * `__resetForTest` clears the per-launch module state (a test process is many "launches").
+ */
+module.exports = {
+  readState,
+  writeState,
+  loadInstallPage,
+  loadReportDetails,
+  rememberInstallPage,
+  rememberReportDetails,
+  ensureInstallationId,
+  reportVersion,
+  handleDeepLink,
+  __resetForTest() {
+    installPageUrl = null;
+    reportUrl = null;
+    reportToken = null;
+    reportedThisLaunch = null;
+  },
+};
