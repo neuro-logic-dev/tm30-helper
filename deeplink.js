@@ -393,6 +393,33 @@ function parseDeepLink(url) {
         }
 
         /**
+         * ADR-0001 / V-2 C-1 — WHERE TO REPORT THIS HELPER'S VERSION, and who to say it is.
+         *
+         * Two additive, OPTIONAL top-level keys on BOTH the v2 and the v3 shape (the block sits
+         * after the branch, so neither shape has to know about them). Same tolerance as
+         * `min_helper_version` directly above: validated shallowly, carried as DATA, and never a
+         * reason to fail a link. A junk value leaves the key off — a Helper that cannot report is
+         * a Helper with a stale badge, which must never cost the operator their filing.
+         *
+         * The URL is re-validated in `main.js` with its own `isHttpUrl` before it is POSTed to or
+         * written to disk; this module stays dependency-free and does not own that rule. The
+         * token is opaque here on purpose: it identifies an operator to the backend and this
+         * side has no way — and no need — to tell a real one from a wrong one.
+         */
+        if (typeof payload.report_url === 'string') {
+            const raw = payload.report_url.trim();
+            try {
+                const proto = new URL(raw).protocol;
+                if (proto === 'http:' || proto === 'https:') result.report_url = raw;
+            } catch {
+                /* not a URL at all — the key stays off, exactly as a junk floor does */
+            }
+        }
+        if (typeof payload.report_token === 'string' && payload.report_token.trim() !== '') {
+            result.report_token = payload.report_token.trim();
+        }
+
+        /**
          * T3-03: the OPTIONAL focus — the filing the window boots pre-selected on. Tolerant
          * BY DESIGN, unlike the row checks above: focus is an enhancement on top of a payload
          * that is otherwise fully usable, so an absent or junk value degrades to "no focus"
