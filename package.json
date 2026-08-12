@@ -1,6 +1,6 @@
 {
   "name": "tm30-helper",
-  "version": "2.3.4",
+  "version": "2.4.0",
   "description": "TM30 Helper — открывает tm30.immigration.go.th с автозаполнением аккаунта по ссылке tm30://",
   "main": "main.js",
   "author": "MO Estate",
