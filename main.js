@@ -7,6 +7,7 @@ const { autoUpdater } = require('electron-updater');
 
 const { parseDeepLink, DeepLinkKind, PROTOCOL, compareVersions } = require('./deeplink');
 const { registerInsertSheet } = require('./insert-sheet');
+const { createQueueClient } = require('./queue-client');
 
 // ---------- Single instance ----------
 // Повторный запуск (в т.ч. по deep link на Win/Linux) пробрасывается
@@ -332,25 +333,25 @@ function ensureInstallationId() {
 /**
  * ADR-0001 — THE VERSION REPORT. `{version, platform}` and the token, to the address on disk.
  *
- * 🔴 Yes, this is shaped like `checkForNewerRelease()` above, and it stays that way. The two
- * calls answer to different masters — GitHub's release feed versus our own report contract —
- * and will change for different reasons; folding them into one `postQuietly()` would couple a
- * timeout, a header set and an error policy that only look alike today. Duplicate until the
- * third occurrence.
+ * 🔴 The POST itself no longer lives here. This used to be an inline `fetch` under a note saying
+ * it was shaped like `checkForNewerRelease()` and would stay duplicated "until the third
+ * occurrence"; ADR-0021 brought the third and the fourth (worklist read, submitted write), so the
+ * transport moved to `queue-client.js` — one timeout, one abort, one `catch` that cannot rethrow,
+ * one place where a token meets a URL. `checkForNewerRelease()` stays where it is: it answers to
+ * GitHub's release feed, not to our contract.
  *
- * WHAT IT MUST NEVER DO: block. Not the window, not a deep link, not a filing. One attempt, a
- * hard 3-second abort, and a `catch` that cannot rethrow. A 404 (rotated secret, unknown token)
- * is not retried and not surfaced — the next deep link brings fresh details and heals it.
+ * WHAT STAYED HERE, because it is genuinely this file's: WHERE the details came from, and
+ * WHETHER this launch already reported. The "already sent" guard is per LAUNCH and keyed on what
+ * was actually sent, so the whenReady report and a deep link carrying the SAME details produce
+ * one POST rather than two, while a link carrying NEW details (the bootstrap case, and a rotated
+ * token) still reports at once. A failed attempt is never re-attempted with the same details:
+ * that would be a retry. The client is built per call and holds nothing between them.
  *
- * The "already sent" guard is per LAUNCH and keyed on what was actually sent, so the whenReady
- * report and a deep link carrying the SAME details produce one POST rather than two, while a
- * link carrying NEW details (the bootstrap case, and a rotated token) still reports at once. A
- * failed attempt is never re-attempted with the same details: that would be a retry.
+ * WHAT IT MUST NEVER DO: block. Not the window, not a deep link, not a filing.
  *
  * The token is never logged. Nothing about a filing, a guest, a villa, an account, a path or a
- * machine is sent — the body below is the entire contract.
+ * machine is sent — the four fields below are the entire contract.
  */
-const REPORT_TIMEOUT_MS = 3000;
 
 /** `url|token` of the report already sent this launch, or null. */
 let reportedThisLaunch = null;
@@ -361,26 +362,12 @@ async function reportVersion() {
   if (attempt === reportedThisLaunch) return;
   reportedThisLaunch = attempt;
 
-  try {
-    const res = await fetch(reportUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token: reportToken,
-        installation_id: ensureInstallationId(),
-        version: app.getVersion(),
-        platform: process.platform,
-      }),
-      signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
-    });
-    if (res.status === 204) {
-      console.log(`[tm30-helper] reported version ${app.getVersion()} (${process.platform})`);
-    } else {
-      console.log(`[tm30-helper] version report not stored: HTTP ${res.status}`);
-    }
-  } catch (e) {
-    console.log('[tm30-helper] version report skipped:', (e && e.message) || e);
-  }
+  await createQueueClient({ token: reportToken }).reportVersion({
+    reportUrl,
+    installationId: ensureInstallationId(),
+    version: app.getVersion(),
+    platform: process.platform,
+  });
 }
 
 /**

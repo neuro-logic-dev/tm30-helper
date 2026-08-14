@@ -22,6 +22,7 @@
       "main.js",
       "preload.js",
       "deeplink.js",
+      "queue-client.js",
       "insert-sheet.js",
       "index.html",
       "window.html",
