@@ -43,6 +43,19 @@ const DeepLinkKind = {
      * breaking rename. `result.payload_version` carries which shape actually arrived, for the log.
      */
     V2: 'v2',
+    /**
+     * A POINTER payload — `{v:4, api_base, token, focus_filing_id?}` (ADR-0021). No rows, no
+     * credentials: the Helper fetches the worklist over HTTPS instead of receiving it.
+     *
+     * 🔴 Deliberately NOT folded into {@link DeepLinkKind.V2}, which is exactly what v3 was.
+     * v3 folded because it NORMALISES to the same rows and nothing downstream can tell them
+     * apart. v4 carries no rows at all, so folding it would hand `main.js` a `V2` result with an
+     * empty `worklist` — a pointer that has not been followed yet, wearing the face of an
+     * operator with nothing to do. That is the 014 §7.9 silent-degradation failure again, and it
+     * is why this is its own kind: a caller that has not been taught to follow a pointer must
+     * fail to match it, loudly, rather than quietly render it as an empty queue.
+     */
+    V4: 'v4',
     /** `tm30://open` with no `d` — the operator asked for the account chooser. */
     CHOOSER: 'chooser',
     /** 🔴 The loud path. A payload that was sent but cannot be trusted. */
@@ -275,15 +288,130 @@ function normalizeRowV3(row, index, bases, villas) {
 }
 
 /**
+ * @internal The OPTIONAL top-level keys a versioned payload may carry, applied to an
+ * already-validated result. Shared by every version branch — v2, v3 and v4 — because none of
+ * them is about rows: they describe the LINK, not its contents.
+ *
+ * Extracted (not retyped) when v4 arrived: the floor in particular has to work identically on a
+ * pointer, and a second copy of the version-gate's input is precisely how a v4 link would end up
+ * silently un-gated. Every block below is verbatim what the v2/v3 branch ran inline before.
+ *
+ * All four are TOLERANT: a junk value leaves the key OFF the result and is never a reason to
+ * fail a link. Absent is the normal state for all of them.
+ */
+function applyOptionalKeys(result, payload) {
+    /**
+     * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
+     *
+     * Expresses what Layer 1's "is there a newer release" cannot: *this particular link
+     * requires ≥ X*. That is the honest signal when the web app has just started sending a
+     * field an older Helper would silently drop — the failure mode §1 of that spec is
+     * entirely about (`focus_filing_id` did exactly this to pre-T3-03 Helpers).
+     *
+     * Carried through as data only. The COMPARISON and the block live in `main.js`, because
+     * this module is pure and testable and must not own a dialog. Tolerant like
+     * `focus_filing_id`: a junk value leaves the key off rather than failing the link, since
+     * a malformed floor must not be a reason to refuse work.
+     */
+    if (typeof payload.min_helper_version === 'string' &&
+        /^\d+\.\d+\.\d+$/.test(payload.min_helper_version.trim())) {
+        result.min_helper_version = payload.min_helper_version.trim();
+    }
+
+    /**
+     * ADR-0001 / V-2 C-1 — WHERE TO REPORT THIS HELPER'S VERSION, and who to say it is.
+     *
+     * Two additive, OPTIONAL top-level keys on the v2, the v3 and the v4 shape alike (this block
+     * sits outside the version branch, so no shape has to know about them). Same tolerance as
+     * `min_helper_version` directly above: validated shallowly, carried as DATA, and never a
+     * reason to fail a link. A junk value leaves the key off — a Helper that cannot report is
+     * a Helper with a stale badge, which must never cost the operator their filing.
+     *
+     * The URL is re-validated in `main.js` with its own `isHttpUrl` before it is POSTed to or
+     * written to disk; this module stays dependency-free and does not own that rule. The
+     * token is opaque here on purpose: it identifies an operator to the backend and this
+     * side has no way — and no need — to tell a real one from a wrong one.
+     *
+     * A C-1 pointer carries NEITHER key (it names one address and one token, and the report
+     * endpoint is derived from `api_base`); absent keys simply stay off, so applying the block
+     * to v4 costs nothing and keeps a future pointer that does carry them working.
+     */
+    if (typeof payload.report_url === 'string') {
+        const raw = payload.report_url.trim();
+        try {
+            const proto = new URL(raw).protocol;
+            if (proto === 'http:' || proto === 'https:') result.report_url = raw;
+        } catch {
+            /* not a URL at all — the key stays off, exactly as a junk floor does */
+        }
+    }
+    if (typeof payload.report_token === 'string' && payload.report_token.trim() !== '') {
+        result.report_token = payload.report_token.trim();
+    }
+
+    /**
+     * T3-03: the OPTIONAL focus — the filing the window boots pre-selected on. Tolerant
+     * BY DESIGN, unlike the row checks above: focus is an enhancement on top of a payload
+     * that is otherwise fully usable, so an absent or junk value degrades to "no focus"
+     * (the key stays OFF the result), never to the loud ERROR path.
+     */
+    if (Number.isFinite(payload.focus_filing_id)) {
+        result.focus_filing_id = payload.focus_filing_id;
+    }
+
+    return result;
+}
+
+/**
+ * @internal Parses the v4 POINTER payload (ADR-0021 C-1): `{api_base, token, focus_filing_id?}`.
+ *
+ * 🔴 BOTH REQUIRED FIELDS FAIL LOUD, in the digest's failure class rather than the
+ * `focus_filing_id` one. Everything else in this parser that is missing has a usable degraded
+ * meaning — no account means "log in by hand", no focus means "no focus", an empty worklist
+ * means "nothing is due". A pointer missing its address or its token has none: it cannot be
+ * followed, and the ONLY other thing it could turn into is a window showing zero filings, which
+ * is indistinguishable from an operator who is done for the day. A queue that cannot be read
+ * must never look like a queue that is empty (014 §7.9).
+ *
+ * `api_base` is checked for an http(s) protocol here, one notch stricter than v3's
+ * string-and-non-empty check on the same key. v3 can afford lax: its bases only decorate rows
+ * that arrived anyway, so a junk base costs a broken download link on a row the operator can
+ * still see. A junk base on a pointer costs the entire queue. `main.js` re-validates with its
+ * own `isHttpUrl` before anything is POSTed or written to disk — this shallow check exists so
+ * the failure is reported at the link, where the operator can act on it.
+ *
+ * The token is opaque, here as everywhere: a non-empty string is the whole contract (ADR-0021).
+ * Unknown keys are ignored, never errors (AC-16).
+ */
+function parseV4Pointer(payload) {
+    const rawBase = typeof payload.api_base === 'string' ? payload.api_base.trim() : '';
+    if (rawBase === '') return fail('v4 payload has no api_base — the pointer has no address');
+    let apiBase;
+    try {
+        const proto = new URL(rawBase).protocol;
+        if (proto !== 'http:' && proto !== 'https:') throw new Error('not http(s)');
+        apiBase = trimSlashes(rawBase);
+    } catch {
+        return fail(`v4 payload has an unusable api_base "${rawBase}"`);
+    }
+
+    const token = typeof payload.token === 'string' ? payload.token.trim() : '';
+    if (token === '') return fail('v4 payload has no token — the pointer cannot be followed');
+
+    return applyOptionalKeys({ kind: DeepLinkKind.V4, api_base: apiBase, token }, payload);
+}
+
+/**
  * Parses a `tm30://` URL into a discriminated result.
  *
  * @param {string} url
  * @returns {{kind:'v1',account:object}
  *          |{kind:'v2',worklist:object[],focus_filing_id?:number}
+ *          |{kind:'v4',api_base:string,token:string,focus_filing_id?:number}
  *          |{kind:'chooser'}
  *          |{kind:'error',reason:string}
  *          |null} `null` ONLY when the URL is not a `tm30://` link at all (nothing to do);
- *          every genuine tm30 link resolves to one of the four kinds above.
+ *          every genuine tm30 link resolves to one of the five kinds above.
  */
 function parseDeepLink(url) {
     if (!url || typeof url !== 'string' || !url.startsWith(PROTOCOL + '://')) return null;
@@ -331,11 +459,15 @@ function parseDeepLink(url) {
 
     if (!payload || typeof payload !== 'object') return fail('link payload is not an object');
 
-    // ── v2 / v3: the whole Stage-B worklist (014 §7.3, ADR-0015) ──
+    // ── v2 / v3: the whole Stage-B worklist (014 §7.3, ADR-0015). v4: a pointer to it ──
     if (payload.v !== undefined) {
-        if (payload.v !== 2 && payload.v !== 3) {
+        if (payload.v !== 2 && payload.v !== 3 && payload.v !== 4) {
             return fail(`unsupported deep-link version "${payload.v}"`);
         }
+
+        // ADR-0021 — the rows stopped travelling in the URL. Its own kind, its own branch, and
+        // it shares only what is genuinely shared: the digest above and the optional keys below.
+        if (payload.v === 4) return parseV4Pointer(payload);
 
         const worklist = [];
 
@@ -374,61 +506,7 @@ function parseDeepLink(url) {
         // layer says so; it is not a reason to fall back to the chooser.
         const result = { kind: DeepLinkKind.V2, worklist, payload_version: payload.v };
 
-        /**
-         * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
-         *
-         * Expresses what Layer 1's "is there a newer release" cannot: *this particular link
-         * requires ≥ X*. That is the honest signal when the web app has just started sending a
-         * field an older Helper would silently drop — the failure mode §1 of that spec is
-         * entirely about (`focus_filing_id` did exactly this to pre-T3-03 Helpers).
-         *
-         * Carried through as data only. The COMPARISON and the block live in `main.js`, because
-         * this module is pure and testable and must not own a dialog. Tolerant like
-         * `focus_filing_id`: a junk value leaves the key off rather than failing the link, since
-         * a malformed floor must not be a reason to refuse work.
-         */
-        if (typeof payload.min_helper_version === 'string' &&
-            /^\d+\.\d+\.\d+$/.test(payload.min_helper_version.trim())) {
-            result.min_helper_version = payload.min_helper_version.trim();
-        }
-
-        /**
-         * ADR-0001 / V-2 C-1 — WHERE TO REPORT THIS HELPER'S VERSION, and who to say it is.
-         *
-         * Two additive, OPTIONAL top-level keys on BOTH the v2 and the v3 shape (the block sits
-         * after the branch, so neither shape has to know about them). Same tolerance as
-         * `min_helper_version` directly above: validated shallowly, carried as DATA, and never a
-         * reason to fail a link. A junk value leaves the key off — a Helper that cannot report is
-         * a Helper with a stale badge, which must never cost the operator their filing.
-         *
-         * The URL is re-validated in `main.js` with its own `isHttpUrl` before it is POSTed to or
-         * written to disk; this module stays dependency-free and does not own that rule. The
-         * token is opaque here on purpose: it identifies an operator to the backend and this
-         * side has no way — and no need — to tell a real one from a wrong one.
-         */
-        if (typeof payload.report_url === 'string') {
-            const raw = payload.report_url.trim();
-            try {
-                const proto = new URL(raw).protocol;
-                if (proto === 'http:' || proto === 'https:') result.report_url = raw;
-            } catch {
-                /* not a URL at all — the key stays off, exactly as a junk floor does */
-            }
-        }
-        if (typeof payload.report_token === 'string' && payload.report_token.trim() !== '') {
-            result.report_token = payload.report_token.trim();
-        }
-
-        /**
-         * T3-03: the OPTIONAL focus — the filing the window boots pre-selected on. Tolerant
-         * BY DESIGN, unlike the row checks above: focus is an enhancement on top of a payload
-         * that is otherwise fully usable, so an absent or junk value degrades to "no focus"
-         * (the key stays OFF the result), never to the loud ERROR path.
-         */
-        if (Number.isFinite(payload.focus_filing_id)) {
-            result.focus_filing_id = payload.focus_filing_id;
-        }
-        return result;
+        return applyOptionalKeys(result, payload);
     }
 
     // ── v1 legacy: `{ name, login, pass }`. UNCHANGED behaviour (013 §5 row 4). ──
