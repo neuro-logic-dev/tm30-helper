@@ -4,6 +4,10 @@
 #
 # WHAT RUNS HERE, and why only this:
 #   • test/mock-portal/*.test.mjs — the mock portal's own unit tests (xlsx validation + server).
+#   • test/*.test.mjs MINUS the seam test — deep-link parsing v1..v4, the queue client, the queue
+#     window's pure functions, the version report, row rendering, portal dates. Added 2026-08-14
+#     (MO-TM30-QUEUE): until then this gate ran none of them, so every one of those suites was
+#     green only on whichever machine last happened to run it.
 #   • test/run-insert.sh   — T3-08/T3-11 ⇥ insert + auto-insert, driving the REAL app.html /
 #     preload.js / insert-sheet.js in a REAL Electron window against the local mock portal.
 #   • test/run-autofill.sh — 4e autofill wiring + timing, same shape.
@@ -73,6 +77,23 @@ jobs:
 
       - name: Mock-portal unit tests
         run: node --test 'test/mock-portal/*.test.mjs'
+
+      # The top-level suites: deep-link parsing (v1..v4), the queue client, the queue window's
+      # pure functions, the version report, row rendering, portal dates. Pure Node — no display,
+      # no Electron, no network. They were green ONLY on a dev machine until 2026-08-14, which
+      # meant the gate could not see a regression in any of them.
+      #
+      # `roundtrip.test.mjs` is EXCLUDED, and that is the one exception this list is allowed to
+      # have: it imports the web emitter compiled by `test/run.sh` into `test/.build`, out of the
+      # PRIVATE mo-reservation-fe repo. Without that build it does not skip, it FAILS — correctly,
+      # since a seam test with nothing on the other side of the seam has proven nothing. It stays
+      # the manual pre-release step RELEASING.md already requires.
+      #
+      # The exclusion is written as a filter over the real directory rather than as a hand-kept
+      # file list: a new `test/*.test.mjs` is picked up here the day it lands, instead of the day
+      # someone remembers to add it.
+      - name: Top-level unit suites (all but the seam test)
+        run: node --test $(ls test/*.test.mjs | grep -v roundtrip)
 
       # `xvfb-run -a` picks a free display number instead of colliding on :99.
       - name: T3-08/T3-11 insert harness (real app.html + insert-sheet.js + mock portal)
