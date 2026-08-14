@@ -47,6 +47,9 @@ const {
     toBase64Url: _unused,
     TM30_DEEP_LINK_MAX_URL_CHARS,
     Tm30DeepLinkTooLargeError,
+    // v4's OWN floor (ADR-0021). Read from the emitter rather than written down here, so (h4)
+    // compares two live constants instead of two copies of the same literal.
+    TM30_MIN_HELPER_VERSION_V4,
 } = emitter;
 
 const ORIGIN = 'https://app.moestate.com';
@@ -701,4 +704,257 @@ test('(g4) compareVersions: ordering, equality, and `null` for anything unparsea
         assert.equal(compareVersions(junk, '2.3.0'), null);
         assert.equal(compareVersions('2.3.0', junk), null);
     }
+});
+
+// ═══════════ (h) v4 — THE POINTER SEAM (ADR-0021, contract C-1) ═══════════════════════════
+//
+// 🔴 THE SAME SEAM, ONE RUNG HIGHER. v4's two implementors sit in two repositories with no shared
+// compiler: the emitter in `mo-reservation-fe/src/lib/tm30.ts` and the parser in `../deeplink.js`.
+// `deeplink-v4.test.mjs` tests the parser against fixtures the parser's own author wrote — which
+// is exactly the arrangement that let 013 §5 row 3 ship: both halves green, neither talking to
+// the other. So every case below goes emitter → parser through the REAL, negotiated
+// `buildTm30HelperLink`; nothing here hand-writes a v4 payload, because a hand-written one would
+// keep passing forever while the emitter drifted.
+//
+// Contract C-1, what must survive byte-for-byte:
+//   { v: 4, min_helper_version: "2.5.0", api_base: "https://…" (no trailing slash),
+//     token: "<opaque>", focus_filing_id?: number }
+
+/**
+ * @internal The `d=` payload of an emitted link, decoded.
+ *
+ * Written rather than reused: the inline `url.split('d=')[1]` decodes above predate the `&c=`
+ * suffix and survive only because `Buffer.from` happens to stop at the invalid `&`. Leaning on
+ * that in a section whose whole subject is byte-exactness would be the wrong kind of luck.
+ */
+const decodePayload = (url) =>
+    JSON.parse(Buffer.from(url.slice(url.indexOf('d=') + 2).split('&c=')[0], 'base64url').toString('utf8'));
+
+/**
+ * C-5 → C-1. The `helper_report` the worklist response carries, shaped exactly like
+ * `villas-be-core`'s `Tm30HelperReportLink`. 🔴 Its `token` is what makes the v4 rung REACHABLE:
+ * omit this argument and the emitter has nothing to point WITH, which is (h7).
+ */
+const helperReport = {
+    url: 'https://api.moestate.com/tm30/helper-report',
+    token: 'opq_9f3c1e7b5a2d4e8f6c0b9a7d3e1f5c2b',
+};
+
+/** The negotiated emitter with a token in hand — i.e. the rung ladder v2 → v3 → v4 is complete. */
+const pointerLink = (items, focus) => buildTm30HelperLink(items, ORIGIN, focus, helperReport);
+
+// ─────────────────── 1. LADDER EQUIVALENCE, decided by the parser ───────────────────
+
+test('🔴 (h1) the ladder at the seam: small → v2, medium → v3, large → v4', () => {
+    // The tier is read off the PARSER's verdict, never off the emitter's intent. That is the
+    // whole point: if the two ever disagree about which shape came out, this is where it shows.
+    const tierOf = (n) => {
+        const result = parseDeepLink(pointerLink(bigWorklist(n)));
+        assert.notEqual(result.kind, DeepLinkKind.ERROR, `${n} rows produced an unparseable link: ${result.reason}`);
+        return result.kind === DeepLinkKind.V4 ? 4 : result.payload_version;
+    };
+
+    // Measured, not assumed — and printed, so ADR-0021's numbers can be checked against reality.
+    const ladder = [];
+    for (let n = 1; n <= 40; n += 1) {
+        const url = pointerLink(bigWorklist(n));
+        ladder.push({ n, tier: parseDeepLink(url).kind === DeepLinkKind.V4 ? 4 : parseDeepLink(url).payload_version, len: url.length });
+    }
+    const lastOf = (t) => ladder.filter((r) => r.tier === t).at(-1);
+    console.log('\n  ── MEASURED rung boundaries (realistic fixture, real emitter → real parser) ──');
+    for (const t of [2, 3, 4]) {
+        const rows = ladder.filter((r) => r.tier === t);
+        if (!rows.length) { console.log(`  v${t}: never reached`); continue; }
+        console.log(
+            `  v${t}: ${rows[0].n}–${rows.at(-1).n} filings` +
+                `  (last link ${lastOf(t).len} chars, ceiling ${TM30_DEEP_LINK_MAX_URL_CHARS})`
+        );
+    }
+    console.log('');
+
+    // 🔴 The ladder is MONOTONE: once the queue is big enough for a pointer it never drops back
+    // to carrying rows. A non-monotone ladder would mean the tier depends on something other
+    // than size, and an operator's link shape would flap between refreshes.
+    const tiers = ladder.map((r) => r.tier);
+    assert.deepEqual([...tiers].sort((a, b) => a - b), tiers, `ladder is not monotone: ${tiers.join('')}`);
+
+    // AC-13/AC-14 as three named points on that ladder.
+    assert.equal(tierOf(2), 2, 'a small worklist must still emit v2 — an old Helper is never worse off');
+    assert.equal(tierOf(12), 3, 'a medium worklist must still emit v3 — rows travel while they fit');
+    assert.equal(tierOf(40), 4, 'a worklist over the v3 ceiling must emit a v4 pointer, not throw');
+
+    // All three rungs are actually exercised by this fixture; if one vanished the asserts above
+    // would still pass in a suite that had quietly stopped testing a shape.
+    for (const t of [2, 3, 4]) assert.ok(lastOf(t), `the fixture never produced a v${t} link`);
+});
+
+// ─────────────── 2. THE POINTER CARRIES NO QUEUE AND NO SECRETS (ADR-0021) ───────────────
+
+test('🔴 (h2) the v4 pointer carries no queue and no credentials — the security claim, as a test', () => {
+    const items = bigWorklist(40);
+    const url = pointerLink(items);
+    const payload = decodePayload(url);
+    const result = parseDeepLink(url);
+
+    assert.equal(result.kind, DeepLinkKind.V4);
+
+    // C-1 exactly: four keys, no fifth. Asserting the key SET (not just the absence of a
+    // blocklist) is what catches a field added on the emitter side that this parser would
+    // silently drop — AC-16's other half, stated where the drift would begin.
+    assert.deepEqual(Object.keys(payload).sort(), ['api_base', 'min_helper_version', 'token', 'v'].sort());
+
+    // The queue itself is not in the link. This is the ADR's premise, not a nicety.
+    for (const key of ['worklist', 'rows', 'villas', 'account', 'sheet_download_url', 'folder_url']) {
+        assert.ok(!(key in payload), `a pointer must not carry \`${key}\``);
+        assert.ok(!(key in result), `the parse result must not fabricate \`${key}\``);
+    }
+
+    // 🔴 GAP-H: the villa portal passwords leave the URL entirely. Checked against the emitted
+    // URL *and* the decoded payload — the URL alone is base64, so a raw-substring pass there
+    // would be nearly vacuous on its own.
+    const decoded = JSON.stringify(payload);
+    for (const secret of [wireRowWithAccount.account.pass, wireRowWithAccount.account.login, items[0].account.login]) {
+        assert.ok(!url.includes(secret), `the emitted URL leaks "${secret}"`);
+        assert.ok(!decoded.includes(secret), `the decoded pointer leaks "${secret}"`);
+    }
+
+    // Contract C-1: no trailing slash, and an address the Helper can actually fetch from.
+    assert.equal(result.api_base, 'https://api.moestate.com');
+    assert.ok(!result.api_base.endsWith('/'), 'api_base must carry no trailing slash');
+    // Opaque, and forwarded verbatim — the emitter does not parse it and neither does the parser.
+    assert.equal(result.token, helperReport.token);
+});
+
+// ───────────────────────── 3. DIGEST BYTE-EQUALITY, as (f1)/(f2) do it ─────────────────────────
+
+test('(h3) the v4 link’s `c=` is what this Helper’s own FNV-1a computes over its `d=`', () => {
+    const url = pointerLink(bigWorklist(40));
+    const encoded = url.slice(url.indexOf('d=') + 2).split('&c=')[0];
+    const emitted = url.split('&c=')[1];
+
+    // Two FNV-1a implementations in two repositories, agreeing on the bytes of a REAL v4 payload.
+    assert.equal(emitted, payloadDigest(encoded), 'the Helper’s digest disagrees with the emitted c=');
+    assert.equal(emitted, tm30PayloadDigest(encoded), 'the emitter’s own digest disagrees with its emitted c=');
+    assert.match(emitted, /^[0-9a-f]{8}$/, 'same 8-hex-char envelope as v2 and v3');
+
+    // ...and the guard has teeth on this shape too: mutate the payload and the link dies loudly
+    // rather than pointing the Helper at some other host.
+    const dStart = url.indexOf('d=') + 2;
+    const mutated = url.slice(0, dStart) + (url[dStart] === 'A' ? 'B' : 'A') + url.slice(dStart + 1);
+    const broken = parseDeepLink(mutated);
+    assert.equal(broken.kind, DeepLinkKind.ERROR);
+    assert.match(broken.reason, /checksum/);
+});
+
+// ──────────────── 4. FLOOR PROPAGATION, BOTH DIRECTIONS (Q-2's two constants) ────────────────
+
+test('🔴 (h4) v4 demands 2.5.0 while v2 and v3 from the SAME emitter still demand 2.3.0', () => {
+    const v2 = parseDeepLink(pointerLink([wireRowWithAccount]));
+    const v3 = parseDeepLink(pointerLink(bigWorklist(12)));
+    const v4 = parseDeepLink(pointerLink(bigWorklist(40)));
+
+    assert.equal(v2.payload_version, 2);
+    assert.equal(v3.payload_version, 3);
+    assert.equal(v4.kind, DeepLinkKind.V4);
+
+    // 🔴 THE DECISION BEING PINNED. A single raised constant would have been the obvious edit and
+    // the damaging one: every 2.3/2.4 operator receiving an ordinary v2 link would have been told
+    // their Helper is too old for a payload it has understood since 2.3. Two constants, and the
+    // rows-carrying shapes keep the floor they have always had.
+    assert.equal(v2.min_helper_version, TM30_MIN_HELPER_VERSION);
+    assert.equal(v3.min_helper_version, TM30_MIN_HELPER_VERSION);
+    assert.equal(v4.min_helper_version, TM30_MIN_HELPER_VERSION_V4);
+
+    // Stated as literals too, on purpose. The two asserts above would both pass if the emitter
+    // collapsed to one constant and this file followed it; C-1 names these numbers, so a bump to
+    // either must break here and be a decision someone makes, not one that leaks in.
+    assert.equal(TM30_MIN_HELPER_VERSION, '2.3.0');
+    assert.equal(TM30_MIN_HELPER_VERSION_V4, '2.5.0');
+    assert.equal(compareVersions(TM30_MIN_HELPER_VERSION_V4, TM30_MIN_HELPER_VERSION), 1,
+        'the pointer floor must sit strictly above the rows floor');
+
+    /**
+     * 🔴 AC-14, and the reason the second constant earns its keep: THIS Helper still satisfies
+     * the v2/v3 floor, so every rows-carrying link it is handed keeps working. Had the floor
+     * been raised once instead of twice, this assertion would fail and every 2.3/2.4 operator
+     * would be staring at "update required" for a payload their build has understood since 2.3.
+     *
+     * 🔴 AND the floor this build must clear to be allowed to CLAIM v4 support. Q-6 left this
+     * guard uninstalled on purpose: at 2.4.0 it failed, correctly — the build parsed a v4
+     * pointer, paired itself from it, then refused it at its own floor gate. Q-7 bumped
+     * `package.json` to 2.5.0, so it holds now, and it is what stops the gap reopening: ship
+     * v4 support below the pointer's own floor again and this goes red before the release does.
+     * `refusedForVersion` is a BLOCKING gate — a Helper under the floor does not degrade, it
+     * refuses, so "2.4.0 with v4 code in it" is an operator staring at "update required" on
+     * every link the emitter has stopped being able to build any other way.
+     */
+    const shipping = JSON.parse(readFileSync(path.join(here, '..', 'package.json'), 'utf8')).version;
+    assert.notEqual(compareVersions(shipping, TM30_MIN_HELPER_VERSION), -1,
+        `this Helper is ${shipping} but a v2/v3 link demands >= ${TM30_MIN_HELPER_VERSION}`);
+    assert.notEqual(compareVersions(shipping, TM30_MIN_HELPER_VERSION_V4), -1,
+        `this Helper is ${shipping} but it ships v4 support, whose floor is ` +
+            `${TM30_MIN_HELPER_VERSION_V4} — it would refuse every v4 pointer it is handed`);
+});
+
+// ─────────────────────── 5. focus_filing_id — present, and ABSENT ───────────────────────
+
+test('(h5) focus_filing_id survives the pointer, and is ABSENT — not `undefined` — when unset', () => {
+    const items = bigWorklist(40);
+    const focused = parseDeepLink(pointerLink(items, items[7].filing_id));
+    assert.equal(focused.kind, DeepLinkKind.V4);
+    assert.equal(focused.focus_filing_id, items[7].filing_id);
+
+    const url = pointerLink(items);
+    // Spread-omitted at the emitter, so the key never reaches the wire. Checked on the emitted
+    // JSON, not only on the parse result: a `null`-stub would round-trip to the same "no focus"
+    // while changing the bytes an older reader sees.
+    assert.ok(!('focus_filing_id' in decodePayload(url)), 'an unfocused pointer must not carry the key');
+    const unfocused = parseDeepLink(url);
+    assert.equal(unfocused.kind, DeepLinkKind.V4);
+    assert.ok(!('focus_filing_id' in unfocused), 'the parse result must not fabricate a focus');
+});
+
+// ──────────── 6. CONSTANT SIZE — the claim ADR-0021 rests on, measured ────────────
+
+test('🔴 (h6) the v4 URL does not grow with the queue — 20 rows and 200 rows, same link', () => {
+    const at = (n) => pointerLink(bigWorklist(n));
+    const small = at(20);
+    const large = at(200);
+
+    console.log(`  ── v4 pointer length: ${small.length} chars @20 filings, ${large.length} @200, ` +
+        `${at(500).length} @500 (ceiling ${TM30_DEEP_LINK_MAX_URL_CHARS}) ──`);
+
+    // Stronger than the "within a few bytes" the AC asks for, and true: a pointer is built from
+    // the api_base and the token alone, so nothing in it varies with the queue at all. If a
+    // future field DOES vary with queue size, this fails and that is the conversation to have.
+    assert.equal(small, large, 'a 20-row and a 200-row pointer must be the identical link');
+    assert.ok(Math.abs(small.length - large.length) <= 4, 'AC form: within a few bytes');
+
+    // And the size claim in absolute terms: the ceiling that produced the 2026-08-14 production
+    // refusal is now two orders of magnitude away, at any queue length.
+    assert.ok(at(500).length < TM30_DEEP_LINK_MAX_URL_CHARS / 4,
+        `a 500-filing pointer is ${at(500).length} chars — the ceiling should not be in sight`);
+
+    // Constant size is worthless if the constant-sized thing does not parse.
+    assert.equal(parseDeepLink(large).kind, DeepLinkKind.V4);
+});
+
+// ──────────────── 7. THE REFUSAL THAT SURVIVES (a pointer with no token) ────────────────
+
+test('🔴 (h7) over the v3 ceiling with NO helper_report, the emitter still REFUSES', () => {
+    const items = bigWorklist(60);
+
+    // ADR-0021 retired the SIZE refusal, not the refusal. Without a token the pointer names a
+    // door the Helper cannot open, and a Helper opening onto a queue it cannot read looks exactly
+    // like an operator with nothing to do — the silent-truncation failure (014 §7.9) in a new hat.
+    assert.throws(
+        () => buildTm30HelperLink(items, ORIGIN),
+        Tm30DeepLinkTooLargeError,
+        'a tokenless pointer is unusable; refusing is the only honest outcome',
+    );
+
+    // 🔴 The contrast that makes the assertion mean something: the SAME worklist, one token
+    // added, emits a pointer instead. Without this line (h7) would pass on a build that had
+    // simply lost the v4 rung entirely.
+    assert.equal(parseDeepLink(pointerLink(items)).kind, DeepLinkKind.V4);
 });

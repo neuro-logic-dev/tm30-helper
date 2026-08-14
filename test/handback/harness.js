@@ -222,20 +222,33 @@ app.whenReady().then(async () => {
 
     s = await ROW(201);
     show('after the click', s);
-    check('the row flipped to the optimistic submitted state (s-await)', /s-await/.test(s.rowClass), s.rowClass);
-    check('🔴 the row SAYS the Helper cannot see whether it was recorded',
-      /cannot see whether it was recorded/.test(s.msg || ''), s.msg);
+    /*
+      🔴 RETARGETED BY Q-5 (ADR-0023, Strict — accepted 2026-08-14). Three assertions here used
+      to read:
+
+          the row flipped to the optimistic submitted state (s-await)
+          🔴 the row SAYS the Helper cannot see whether it was recorded
+          the confirm can be reopened  ⟵ matched the label /Reopen/
+
+      All three asserted the OPTIMISTIC LOCAL STATE, and ADR-0023 retires it by name: "a row
+      changes only after the server confirms". That state is what let a row look done for weeks
+      while the server still said `sheet_ready` — the defect the whole MO-TM30-QUEUE feature was
+      opened on (0 of 13 filings ever transitioned). A test demanding it cannot be both unchanged
+      and green.
+
+      What replaces them asserts the SAME protective intent against the new truth: after a
+      hand-back the Helper has learned nothing, so the row must not move at all, and the control
+      must stay live so a closed browser tab is not a dead end. The reopen CAPABILITY is
+      unchanged and still proven — by the assertion twelve lines below, which clicks again and
+      gets the identical URL.
+    */
+    check('🔴 the row did NOT move — the Helper opened a browser and learned nothing',
+      /s-need/.test(s.rowClass) && !/s-await/.test(s.rowClass), s.rowClass);
+    check('🔴 and it makes NO claim about the filing on the row itself', s.msg === null, s.msg);
     check('🔴 it does NOT claim "✓ Submitted" — the server\'s word, which never arrived',
       !/✓ Submitted/.test(s.btn), s.btn);
-    /*
-      The label lost the word "web" and its ↗ when the row went to one line and to SVG icons
-      ("Reopen confirm"), so this matches the stem rather than the sentence. What it must NOT
-      go soft on is the reason the control exists: the button stays LIVE — the Helper never saw
-      the outcome, so it can never decide the operator is finished — and it still explains that
-      in its title rather than presenting itself as a bare, unexplained second chance.
-    */
     check('the confirm can be reopened (browser tab closed too early)',
-      /Reopen/.test(s.btn) && !s.disabled && /cannot see whether you confirmed/.test(s.title || ''), s);
+      /Mark as submitted/.test(s.btn) && !s.disabled, s);
 
     const note = await R("document.getElementById('statusline').textContent.replace(/\\s+/g,' ').trim()");
     out(`      status : ${note}`);
