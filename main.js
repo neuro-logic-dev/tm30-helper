@@ -209,6 +209,19 @@ let installPageUrl = null;
 let reportUrl = null;
 let reportToken = null;
 
+/**
+ * ADR-0021 — WHERE THE QUEUE LIVES. The backend base a v4 pointer names outright, and that a
+ * v2/v3 link betrays through the sheet URLs it already carries (see {@link deriveApiBase}).
+ *
+ * Remembered for the same reason the two above are, and it matters more: from 2.5.0 the rows do
+ * not travel in the link at all, so a Dock launch with no memo is a Helper that knows of no
+ * queue whatsoever. Null until some link has taught us stays a SUPPORTED state — the Helper is
+ * then exactly the offline shell it was before ADR-0021.
+ *
+ * 🔴 The FETCH that uses it is task Q-5's, not this file's yet. This is the memo half only.
+ */
+let apiBase = null;
+
 function stateFilePath() {
   return path.join(app.getPath('userData'), STATE_FILENAME);
 }
@@ -263,6 +276,40 @@ function deriveInstallPage(worklist) {
   }
 }
 
+/**
+ * ADR-0021 / AC-14 — the backend base this link teaches us, or null.
+ *
+ * Two sources, in this order and no third:
+ *
+ *  1. **The result says so.** A v4 pointer's whole payload is an address and a token; a future
+ *     shape that states `api_base` outright is read the same way.
+ *  2. **A row's `sheet_download_url` gives it away.** That is what makes a v2/v3 link BOOTSTRAP
+ *     material rather than merely a snapshot (AC-14): the deployment that BUILT the sheet URL is
+ *     the one asked to answer for the queue. It is byte-for-byte the emitter's own rule
+ *     (`resolveApiBase`, `mo-reservation-fe/src/lib/tm30.ts`), which is also how v3's `api_base`
+ *     header is computed in the first place — so an origin derived here equals the header a v3
+ *     payload carries, and nothing is lost by reading the rows instead of the header.
+ *
+ * 🔴 No origin is hardcoded, exactly as in {@link deriveInstallPage}: the Helper is told where
+ * its backend is by the web app that launched it, so a staging operator fetches from staging.
+ *
+ * A v2/v3 link whose rows carry no sheet URL yet (nothing generated) teaches nothing, and that
+ * is a supported state — it is the link that comes WITH work attached that we need this from.
+ */
+function deriveApiBase(result) {
+  if (!result) return null;
+  if (isHttpUrl(result.api_base)) return String(result.api_base).replace(/\/+$/, '');
+  for (const row of result.worklist || []) {
+    if (!row || !row.sheet_download_url) continue;
+    try {
+      return new URL(row.sheet_download_url).origin;
+    } catch {
+      /* one malformed URL is not a reason to give up on the next row */
+    }
+  }
+  return null;
+}
+
 function loadInstallPage() {
   /* first launch, or a hand-edited file — either way `readState` says `{}` and no origin yet */
   const { install_url: url } = readState();
@@ -278,38 +325,82 @@ function rememberInstallPage(worklist) {
 }
 
 /**
- * The reporting details as of the last link that carried them.
+ * The bootstrap material as of the last link that carried it.
  *
- * `report_url` goes through the SAME `isHttpUrl` gate on the way OUT of the file as on the way
- * in: `tm30-state.json` sits in a writable directory and this is a URL we are about to POST to.
- * Read as a PAIR — a token with nowhere to go and an address with nobody to name are both just
- * silence, and half-restored state would only make the silence harder to explain.
+ * Every URL goes through the SAME `isHttpUrl` gate on the way OUT of the file as on the way in:
+ * `tm30-state.json` sits in a writable directory and these are addresses we are about to POST
+ * to and fetch from.
+ *
+ * 🔴 Read FACT BY FACT since ADR-0021, where it used to insist on the report PAIR. The pair rule
+ * said "a token with nowhere to go is just silence", and that was true while the token had one
+ * job. It now has two: a v4 pointer carries the same operator token with NO `report_url` beside
+ * it, so a paired read would throw away the one credential the queue fetch runs on — and a
+ * Helper that has been paired would look, on its next Dock launch, exactly like one that never
+ * was. Nothing becomes louder: `reportVersion` still requires BOTH before it says a word, which
+ * is where that rule belonged all along.
  */
 function loadReportDetails() {
   const state = readState();
-  if (isHttpUrl(state.report_url) && typeof state.report_token === 'string' && state.report_token) {
-    reportUrl = state.report_url;
+  if (isHttpUrl(state.report_url)) reportUrl = state.report_url;
+  if (typeof state.report_token === 'string' && state.report_token) {
     reportToken = state.report_token;
   }
+  if (isHttpUrl(state.api_base)) apiBase = state.api_base;
 }
 
 /**
- * AC-12 — a link that carries reporting details teaches them to disk, so that every FUTURE
- * launch can report without a link. Called before the Layer-2 gate for the same reason
- * `rememberInstallPage` is: an operator whose link was just refused for being too old is exactly
- * the operator whose version the dashboard most needs to have heard.
+ * AC-12 / AC-7 — a link that carries bootstrap material teaches it to disk, so that every FUTURE
+ * launch can report, and (from Q-5) fetch, without a link. Called before the Layer-2 gate for
+ * the same reason `rememberInstallPage` is: an operator whose link was just refused for being
+ * too old is exactly the operator whose version the dashboard most needs to have heard.
  *
  * Junk cannot get in — and cannot cost anything either: bad details leave the Helper as silent
  * as it was before the link arrived, and the filing opens regardless.
+ *
+ * 🔴 THREE FACTS, WRITTEN INDEPENDENTLY, ONE TOKEN (ADR-0021).
+ *
+ * `report_token` holds the SAME opaque per-operator string a v4 pointer calls `token`. It is
+ * stored ONCE, under the name it has had since ADR-0001, precisely because it is one secret: two
+ * fields would be two things to rotate, and the day they disagree is the day nobody can say
+ * which one the backend accepted. (The NAME now reads narrower than the job — see the report's
+ * proposal; renaming it here would break Q-5 and Q-7, which is why it stays.)
+ *
+ * `report_url` still refuses to be written without a token beside it (an address with nobody to
+ * name is silence, and `reportVersion` would never use it). The token no longer refuses to be
+ * written without the URL: a v4 pointer carries no `report_url` at all, and refusing there would
+ * mean a pointer link paired the Helper with nothing.
  */
 function rememberReportDetails(result) {
-  const url = result && result.report_url;
-  const token = result && result.report_token;
-  if (!isHttpUrl(url) || typeof token !== 'string' || token === '') return;
-  if (url === reportUrl && token === reportToken) return; // already known — nothing to write
-  reportUrl = url;
-  reportToken = token;
-  writeState({ report_url: url, report_token: token });
+  if (!result) return;
+  const patch = {};
+
+  // One token, under either of the two names the wire gives it — v2/v3 `report_token`, v4
+  // `token`. `report_token` wins when a payload somehow carries both: it is the older contract.
+  const token =
+    typeof result.report_token === 'string' && result.report_token !== ''
+      ? result.report_token
+      : typeof result.token === 'string' && result.token !== ''
+        ? result.token
+        : '';
+
+  const url = result.report_url;
+  if (isHttpUrl(url) && token && url !== reportUrl) {
+    reportUrl = url;
+    patch.report_url = url;
+  }
+  if (token && token !== reportToken) {
+    reportToken = token;
+    patch.report_token = token;
+  }
+
+  const base = deriveApiBase(result);
+  if (base && base !== apiBase) {
+    apiBase = base;
+    patch.api_base = base;
+  }
+
+  if (Object.keys(patch).length === 0) return; // already known — nothing to write
+  writeState(patch);
 }
 
 /**
@@ -490,6 +581,28 @@ function handleDeepLink(url) {
       openWorklistWindow(result.worklist, result.focus_filing_id);
       return;
     }
+
+    /**
+     * ADR-0021 — THE POINTER. No rows arrived; what arrived is where to get them and what to
+     * present when asking. This build LEARNS it and stops there, deliberately:
+     *
+     *   · remembering is this task's whole job, and it must land before anything can fetch;
+     *   · the fetch, the floor gate and the window that shows the result are task Q-5's, and
+     *     wiring half of them here would be the same routing decision made twice.
+     *
+     * Nothing opens yet, and on this branch nothing would anyway: `min_helper_version` on a v4
+     * link is 2.5.0 and this package is 2.4.0, so the gate Q-5 adds refuses it until the release
+     * that carries the fetch. The token and the address are still worth keeping — a refused link
+     * has always taught this Helper where it was sent from.
+     */
+    case DeepLinkKind.V4:
+      console.log(
+        `[tm30-helper] deep link v4: pointer to ${result.api_base}` +
+          (result.focus_filing_id !== undefined ? `, focus filing #${result.focus_filing_id}` : '')
+      );
+      rememberReportDetails(result);
+      void reportVersion();
+      return;
 
     case DeepLinkKind.CHOOSER:
       console.log('[tm30-helper] deep link: chooser (no payload)');
@@ -779,6 +892,7 @@ module.exports = {
     installPageUrl = null;
     reportUrl = null;
     reportToken = null;
+    apiBase = null;
     reportedThisLaunch = null;
   },
 };

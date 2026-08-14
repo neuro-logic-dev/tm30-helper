@@ -152,10 +152,20 @@ test('malformed rows and a missing rows array are errors, never silent fallbacks
     );
 });
 
-test('an unknown version is STILL loud — v4 must not be guessed at', () => {
-    const out = parseDeepLink(link({ ...v3(), v: 4 }));
-    assert.equal(out.kind, DeepLinkKind.ERROR);
-    assert.match(out.reason, /unsupported deep-link version "4"/);
+test('an unknown version is STILL loud — v5 must not be guessed at', () => {
+    // 🔴 This case named v4 until ADR-0021 gave v4 a meaning (a pointer: `{api_base, token}`).
+    // The RULE it was written to protect is untouched and is what is asserted here: a version
+    // this build does not know is an ERROR, never a guess and never a fallback. It has simply
+    // moved up a number. That a v3 body wearing `v: 4` is still loud — for the pointer's own
+    // reason now, since it carries no token — is the second assertion, and it is the one that
+    // says the new branch did not turn a mislabelled worklist into a silent empty queue.
+    const unknown = parseDeepLink(link({ ...v3(), v: 5 }));
+    assert.equal(unknown.kind, DeepLinkKind.ERROR);
+    assert.match(unknown.reason, /unsupported deep-link version "5"/);
+
+    const mislabelled = parseDeepLink(link({ ...v3(), v: 4 }));
+    assert.equal(mislabelled.kind, DeepLinkKind.ERROR);
+    assert.match(mislabelled.reason, /token/);
 });
 
 test('focus_filing_id behaves exactly as it does in v2', () => {
