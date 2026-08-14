@@ -269,7 +269,14 @@ jobs:
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json package-lock.json
-          git commit -m "chore: release $VERSION"
+          # The bump may already be in the tree, and that is legitimate — not a mistake to guard
+          # against. A version can be part of the SOURCE rather than release metadata: since
+          # MO-TM30-QUEUE, `test/roundtrip.test.mjs` asserts that the shipped version clears the
+          # floor a v4 deep link demands, so the bump has to land on the branch for the suite to
+          # be green BEFORE the release runs. With `set -e`, an unconditional `git commit` on a
+          # clean tree exits 1 and kills the release after both installers have already built —
+          # which is exactly how v2.5.0's first attempt died (run 31803183144).
+          git diff --cached --quiet || git commit -m "chore: release $VERSION"
           git tag -a "$TAG" -m "TM30 Helper $TAG"
           git push origin "HEAD:main" --follow-tags
 
