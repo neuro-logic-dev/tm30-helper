@@ -7,7 +7,7 @@ const { autoUpdater } = require('electron-updater');
 
 const { parseDeepLink, DeepLinkKind, PROTOCOL, compareVersions } = require('./deeplink');
 const { registerInsertSheet } = require('./insert-sheet');
-const { createQueueClient } = require('./queue-client');
+const { createQueueClient, ErrorKind } = require('./queue-client');
 
 // ---------- Single instance ----------
 // Повторный запуск (в т.ч. по deep link на Win/Linux) пробрасывается
@@ -447,18 +447,78 @@ function ensureInstallationId() {
 /** `url|token` of the report already sent this launch, or null. */
 let reportedThisLaunch = null;
 
+/**
+ * WHERE to post the version report — the address on disk, or the one `api_base` implies.
+ *
+ * 🔴 ORCHESTRATOR DECISION (Tier-2, 2026-08-14), and the reason it exists: contract C-1 gives a
+ * v4 pointer no `report_url` at all. Without this, an operator whose queue is always big enough
+ * to emit v4 would silently stop reporting a Helper version — the dashboard would show a fleet
+ * frozen at whatever it last heard, with nothing anywhere saying why. A silent degradation is the
+ * one failure mode this project does not accept (Q-4 report §7.2 raised it).
+ *
+ * The composed shape is the backend's own (`tm30-helper-report.service.ts`:80 builds it as
+ * `${API_PUBLIC_URL}/tm30/helper-report`), and it is the SAME rebuild-from-a-base move v3 rows
+ * already make for sheet and return URLs. No origin is hardcoded: `apiBase` is whatever the web
+ * app that launched us named, so a staging operator still reports to staging.
+ *
+ * A stored `report_url` always wins — it was stated outright rather than inferred.
+ */
+function resolveReportUrl() {
+  if (isHttpUrl(reportUrl)) return reportUrl;
+  if (isHttpUrl(apiBase)) return `${apiBase}/tm30/helper-report`;
+  return null;
+}
+
 async function reportVersion() {
-  if (!isHttpUrl(reportUrl) || !reportToken) return; // nobody ever told us where — stay silent
-  const attempt = `${reportUrl}|${reportToken}`;
+  const url = resolveReportUrl();
+  // Both or neither, unchanged: an address with nobody to name is silence (AC-14).
+  if (!url || !reportToken) return; // nobody ever told us where — stay silent
+  const attempt = `${url}|${reportToken}`;
   if (attempt === reportedThisLaunch) return;
   reportedThisLaunch = attempt;
 
   await createQueueClient({ token: reportToken }).reportVersion({
-    reportUrl,
+    reportUrl: url,
     installationId: ensureInstallationId(),
     version: app.getVersion(),
     platform: process.platform,
   });
+}
+
+/**
+ * ADR-0021 / ADR-0022 — can this Helper fetch its queue?
+ *
+ * BOTH facts or neither: a token with no address has nowhere to go, and an address with no token
+ * would be refused. The pair is what "paired" means, and it is the single condition the Dock
+ * launch routes on, so the window can never open in fetch mode and then discover it cannot fetch.
+ */
+function isPaired() {
+  return Boolean(reportToken) && isHttpUrl(apiBase);
+}
+
+/** The client for the queue routes, built per call and holding nothing between them (Q-3). */
+function queueClient() {
+  return createQueueClient({ apiBase, token: reportToken });
+}
+
+/**
+ * AC-4 — THE DISCARD. A 401/403 means this token is not good here any more, so it stops existing:
+ * in memory, and in the memo that would otherwise re-supply it on the next launch.
+ *
+ * 🔴 Only main ever does this. The renderer is told `unauthorized` and paints state 5; it never
+ * manages a credential it cannot see. `reportedThisLaunch` is cleared with it so a re-pair in the
+ * same session reports again rather than being mistaken for a repeat.
+ *
+ * `undefined` in the patch REMOVES the key: `writeState` union-merges and `JSON.stringify` drops
+ * undefined values, so the memo loses the credential rather than keeping an empty spelling of it
+ * that `loadReportDetails` would then have to know to distrust.
+ */
+function discardReportToken() {
+  if (!reportToken) return;
+  console.log('[tm30-helper] queue access refused — discarding the stored token (AC-4)');
+  reportToken = null;
+  reportedThisLaunch = null;
+  writeState({ report_token: undefined });
 }
 
 /**
@@ -526,6 +586,16 @@ function openWorklistWindow(worklist, focusFilingId) {
       // T3-07: portal-base override for the internal MOCK-portal e2e (test/mock-portal/).
       // Unset ⇒ the param is absent ⇒ app.html falls back to the real portal URL, byte-identical.
       ...(process.env.TM30_PORTAL_BASE_URL ? { portal: process.env.TM30_PORTAL_BASE_URL } : {}),
+      /*
+        ADR-0022 state 5 — WHERE "Open MO" GOES when access is revoked.
+        The revoked window has to name the one action that fixes it, and by then the fetch has no
+        token and the rows have no `return_url` to derive an origin from. So the address travels
+        the same zero-dep query mechanism `upd`/`portal` already use, from the memo main has held
+        since ADR-0001. Unknown ⇒ the param is absent ⇒ the button says so instead of lying.
+        🔴 Deliberately NOT a preload verb: C-8 is frozen at three, and this is a fact the window
+        needs at BIRTH, not a question it asks later.
+      */
+      ...(installPageUrl ? { install: installPageUrl } : {}),
       // Layer 1's verdict, already compared in the main process — the renderer only paints it.
       ...(latestKnownVersion ? { upd: latestKnownVersion, cur: app.getVersion() } : {}),
     },
@@ -541,6 +611,37 @@ function openWorklistWindow(worklist, focusFilingId) {
  * ошибки и НИКОГДА не деградирует до chooser'а. «Нет учётки» и «битая ссылка» — разные
  * состояния, и выглядят они по-разному: первое открывает окно worklist'а, второе — вот это.
  */
+/**
+ * 🔴 ADR-0022 — WHERE A LAUNCH WITH NO PAYLOAD GOES. The one branch this whole feature turns on.
+ *
+ * The habitual launch is the Dock or the Start menu, and until now it landed on the standalone
+ * portal window — which by policy (013 §3.5) has NO preload, so it structurally cannot show a
+ * queue or a "Mark submitted". That is why production measured 0 of 13 filings ever reaching
+ * `submitted`: the feature existed and was simply unreachable from the path operators use.
+ *
+ * With ADR-0021 the rows no longer arrive in the link, so the historical reason the queue window
+ * needed one ("it needs a payload") is gone: a PAIRED Helper opens the queue window and fetches.
+ *
+ * The unpaired case still opens the standalone window, unchanged and still preload-less — 013
+ * §3.5 is superseded only in the sense that this window is no longer the Dock destination. It is
+ * granted no IPC channel here or anywhere (AC-2).
+ *
+ * Called from all three payload-less entry points, because they are one situation wearing three
+ * shapes and routing two of them would leave AC-1 unmet on the platform it matters most: a
+ * `tm30://open` with no payload (CHOOSER), a cold start with no link at all (macOS Dock, Windows
+ * Start menu), and a re-activation with every window closed (macOS Dock again).
+ */
+function openLaunchWindow() {
+  if (isPaired()) {
+    console.log('[tm30-helper] launch: paired — opening the queue window in fetch mode');
+    // No rows to hand over: the window boots empty and asks for them itself (ADR-0021).
+    openWorklistWindow([]);
+    return;
+  }
+  console.log('[tm30-helper] launch: not paired — opening the standalone portal window');
+  openStandaloneWindow();
+}
+
 function reportBrokenLink(reason, url) {
   console.error('[tm30-helper] BROKEN DEEP LINK:', reason, '\n  url:', url);
   dialog.showErrorBox(
@@ -584,16 +685,16 @@ function handleDeepLink(url) {
 
     /**
      * ADR-0021 — THE POINTER. No rows arrived; what arrived is where to get them and what to
-     * present when asking. This build LEARNS it and stops there, deliberately:
+     * present when asking. Q-4 taught this case to REMEMBER; Q-5 gives it the window that acts
+     * on what was remembered.
      *
-     *   · remembering is this task's whole job, and it must land before anything can fetch;
-     *   · the fetch, the floor gate and the window that shows the result are task Q-5's, and
-     *     wiring half of them here would be the same routing decision made twice.
+     * The order is the v2 case's, for the v2 case's reasons: remember BEFORE the floor gate, so a
+     * link this build is too old for still leaves the Helper paired — that operator is precisely
+     * the one who will next launch from the Dock and need a queue there.
      *
-     * Nothing opens yet, and on this branch nothing would anyway: `min_helper_version` on a v4
-     * link is 2.5.0 and this package is 2.4.0, so the gate Q-5 adds refuses it until the release
-     * that carries the fetch. The token and the address are still worth keeping — a refused link
-     * has always taught this Helper where it was sent from.
+     * ⚠️ On this branch the gate refuses every v4 link anyway: a v4 payload's floor is 2.5.0 and
+     * `package.json` is still 2.4.0 (the version bump is Q-7's, out of scope here). That is the
+     * intended state until the release that ships the fetch — the pairing still lands.
      */
     case DeepLinkKind.V4:
       console.log(
@@ -602,11 +703,15 @@ function handleDeepLink(url) {
       );
       rememberReportDetails(result);
       void reportVersion();
+      if (refusedForVersion(result, url)) return;
+      // No rows in a pointer, by construction — the window fetches them. The focus rides along
+      // and is resolved against the FETCHED queue, since there is no payload to resolve it in.
+      openWorklistWindow([], result.focus_filing_id);
       return;
 
     case DeepLinkKind.CHOOSER:
       console.log('[tm30-helper] deep link: chooser (no payload)');
-      openStandaloneWindow();
+      openLaunchWindow();
       return;
 
     case DeepLinkKind.ERROR:
@@ -757,6 +862,71 @@ ipcMain.handle('tm30:open-external', async (_event, rawUrl) => {
   }
 });
 
+// ---------- Q-5: the queue (ADR-0021, ADR-0022, ADR-0023) ----------
+/**
+ * 🔴 THE THREE QUEUE HANDLERS, AND THE ONE RULE THEY ALL KEEP.
+ *
+ * The token lives here and dies here. It is read from the module state, handed to the client, and
+ * what goes back to the renderer is an OUTCOME — rows, a filing, or a `kind`. Nothing in the three
+ * returns below can carry it, which is why `getQueueStatus` answers a boolean and not a string.
+ *
+ * They are also deliberately thin. Every decision that could be got wrong twice — the URL shapes,
+ * the timeout, the 401-vs-400 classification, the "never throw" contract — lives in
+ * `queue-client.js` (Q-3, frozen). What is genuinely this file's is WHOSE token and WHICH base,
+ * plus AC-4's discard, which is a change to main's own state and belongs nowhere else.
+ */
+
+/**
+ * AC-1 / AC-3 / AC-4 — fetch the queue, and pay AC-4's price on the spot.
+ *
+ * Deliberately takes no arguments: see the preload's note. The `booking_id` filter the route
+ * accepts is NOT wired to the deep link's `focus_filing_id` — those are different id spaces, and
+ * narrowing the queue to one booking would answer a question nobody asked while hiding the rest
+ * of the operator's work. The focus is a HIGHLIGHT, resolved renderer-side against the full queue.
+ */
+ipcMain.handle('tm30:fetch-worklist', async () => {
+  const res = await queueClient().fetchWorklist();
+  /*
+    🔴 AC-4 — DISCARD AND STOP, decided here rather than in the renderer, which has no credential
+    to drop and no file to write. Q-3's integration note is the trap this guards: a MISSING token
+    or base comes back `refused`/`status:0`, NOT `unauthorized` — there is nothing to discard in
+    that case, and treating it as a revocation would delete a perfectly good token for being
+    unaccompanied. Only a real 401/403 gets here.
+  */
+  if (!res.ok && res.kind === ErrorKind.UNAUTHORIZED) discardReportToken();
+  return res;
+});
+
+/**
+ * AC-11 / AC-11a / ADR-0023 — the Helper posts the transition itself.
+ *
+ * `user_id` is not sent and could not be honoured if it were: the route derives the actor from
+ * the token server-side, which is the whole reason this attestation is allowed to leave the
+ * Helper at all. The refusal path returns the server's own words untouched (`message`) — the row
+ * shows them verbatim rather than the Helper's guess at what they meant.
+ */
+ipcMain.handle('tm30:mark-submitted', async (_event, req) => {
+  const res = await queueClient().markSubmitted(req && req.filing_id, {
+    receiptNo: req && req.receipt_no,
+  });
+  // A revoked token is revoked whichever route discovered it — same discard, same reason (AC-4).
+  if (!res.ok && res.kind === ErrorKind.UNAUTHORIZED) discardReportToken();
+  return res;
+});
+
+/**
+ * ADR-0022 — what the window is allowed to assume about itself.
+ *
+ * 🔴 `paired` is computed, never stored: it is `token && api_base`, the same condition
+ * `openLaunchWindow` routes on, asked once here so the window and the router can never disagree
+ * about whether a fetch is possible. Asked AGAIN after a 401, it answers false — which is how the
+ * renderer learns the discard happened without ever being told what was discarded.
+ */
+ipcMain.handle('tm30:queue-status', async () => ({
+  paired: isPaired(),
+  ...(isHttpUrl(apiBase) ? { apiBase } : {}),
+}));
+
 // ---------- Автообновление ----------
 /**
  * На Windows помощник обновляет себя сам, молча. Ничего не спрашиваем и ничего не
@@ -853,7 +1023,9 @@ app.whenReady().then(() => {
   if (url) {
     handleDeepLink(url);
   } else {
-    openStandaloneWindow();
+    // ADR-0022 — THE Dock / Start-menu launch: no link, no argv, just the app icon. This is the
+    // path production measured 0/13 on, and the one AC-1 is written about.
+    openLaunchWindow();
   }
   pendingLink = null;
 });
@@ -863,7 +1035,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) openStandaloneWindow();
+  // macOS: the Dock icon again, with every window closed. Same situation as a cold launch, so it
+  // takes the same branch — routing this one to the portal would put the queue one launch out of
+  // reach for exactly the operator who just asked for it.
+  if (BrowserWindow.getAllWindows().length === 0) openLaunchWindow();
 });
 
 /**
@@ -888,6 +1063,11 @@ module.exports = {
   ensureInstallationId,
   reportVersion,
   handleDeepLink,
+  // Q-5 — the routing decision and the credential drop, so a test drives the REAL ones.
+  isPaired,
+  resolveReportUrl,
+  discardReportToken,
+  openLaunchWindow,
   __resetForTest() {
     installPageUrl = null;
     reportUrl = null;

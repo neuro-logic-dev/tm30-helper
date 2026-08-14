@@ -36,6 +36,18 @@
   p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
   .version { margin-top: 20px; font-size: 12px; }
 
+  /* AC-2 / ADR-0022 state 7 — the unpaired hint. This window is where a Dock launch lands ONLY
+     when the Helper has never been paired, so it is the one place that can say what pairing is
+     and how it happens. It explains; it blocks nothing. */
+  .pairhint {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    text-align: left;
+  }
+  /* Direct child only — the `<b>` naming the menu path inside the paragraph stays inline. */
+  .pairhint > b { display: block; color: var(--text); font-size: 14px; margin-bottom: 6px; }
+
   /* ADR-0001 — the same strip `app.html` shows, in the window an operator reaches from the
      Dock. Deliberately identical in wording and colour: one notice, two places, so nobody has
      to learn it twice. Dismissible for this window only — the reason it appeared has not gone
@@ -85,6 +97,13 @@
   <main>
     <h1>TM30 Helper</h1>
     <p>This app is launched from the dashboard: press the TM30 button there to open your filing queue.</p>
+    <!-- AC-2: a launch from the Dock with no stored key lands here, and must say why there is no
+         queue on screen and what the one action is that produces one. -->
+    <div class="pairhint">
+      <b>This computer is not connected to MO yet</b>
+      <p>Open <b>Upcoming Reservations → TM30</b> in MO and launch the Helper from there once.
+        Your queue then appears here on every launch.</p>
+    </div>
     <p class="version" id="version"></p>
   </main>
 </div>
