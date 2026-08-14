@@ -874,22 +874,26 @@ test('🔴 (h4) v4 demands 2.5.0 while v2 and v3 from the SAME emitter still dem
         'the pointer floor must sit strictly above the rows floor');
 
     /**
-     * 🔴 AC-14, and the reason the second constant earns its keep: THIS Helper — 2.4.0 on this
-     * branch — still satisfies the v2/v3 floor, so every rows-carrying link it is handed keeps
-     * working. Had the floor been raised once instead of twice, this assertion would fail and
-     * every 2.3/2.4 operator would be staring at "update required" for a payload their build has
-     * understood since 2.3.
+     * 🔴 AC-14, and the reason the second constant earns its keep: THIS Helper still satisfies
+     * the v2/v3 floor, so every rows-carrying link it is handed keeps working. Had the floor
+     * been raised once instead of twice, this assertion would fail and every 2.3/2.4 operator
+     * would be staring at "update required" for a payload their build has understood since 2.3.
      *
-     * ⚠️ There is deliberately NO matching `shipping >= 2.5.0` assertion here — it would fail
-     * today, correctly: `package.json` is 2.4.0 and the bump is Q-7's (see the same note in
-     * `main.js` at the `DeepLinkKind.V4` case). Until it lands, this build parses a v4 pointer,
-     * pairs itself from it, and then refuses it at the floor gate — the intended pre-release
-     * state. 🔴 Q-7 SHOULD ADD THE (g2)-FORM GUARD in the commit that bumps the version:
-     * `assert.notEqual(compareVersions(shipping, TM30_MIN_HELPER_VERSION_V4), -1)`.
+     * 🔴 AND the floor this build must clear to be allowed to CLAIM v4 support. Q-6 left this
+     * guard uninstalled on purpose: at 2.4.0 it failed, correctly — the build parsed a v4
+     * pointer, paired itself from it, then refused it at its own floor gate. Q-7 bumped
+     * `package.json` to 2.5.0, so it holds now, and it is what stops the gap reopening: ship
+     * v4 support below the pointer's own floor again and this goes red before the release does.
+     * `refusedForVersion` is a BLOCKING gate — a Helper under the floor does not degrade, it
+     * refuses, so "2.4.0 with v4 code in it" is an operator staring at "update required" on
+     * every link the emitter has stopped being able to build any other way.
      */
     const shipping = JSON.parse(readFileSync(path.join(here, '..', 'package.json'), 'utf8')).version;
     assert.notEqual(compareVersions(shipping, TM30_MIN_HELPER_VERSION), -1,
         `this Helper is ${shipping} but a v2/v3 link demands >= ${TM30_MIN_HELPER_VERSION}`);
+    assert.notEqual(compareVersions(shipping, TM30_MIN_HELPER_VERSION_V4), -1,
+        `this Helper is ${shipping} but it ships v4 support, whose floor is ` +
+            `${TM30_MIN_HELPER_VERSION_V4} — it would refuse every v4 pointer it is handed`);
 });
 
 // ─────────────────────── 5. focus_filing_id — present, and ABSENT ───────────────────────
