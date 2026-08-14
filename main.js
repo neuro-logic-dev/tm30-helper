@@ -128,8 +128,10 @@ function broadcastUpdateNotice() {
  * 🔴 Это окно ТОЛЬКО для v2. v1 (`openAccountWindow` / `openStandaloneWindow`)
  * не тронут — обратная совместимость обязательна (013 §3.5).
  *
- * Механизм передачи данных прежний и намеренно нулевой по зависимостям: payload
- * уезжает в query как base64url — ни preload, ни IPC, ни сети (014 §2.5).
+ * Механизм ЗАГРУЗКИ окна прежний и намеренно нулевой по зависимостям: bootstrap-payload
+ * v2/v3-ссылки уезжает в query как base64url — ни preload, ни IPC, ни сети. Это утверждение
+ * про ОТКРЫТИЕ окна, а не про приложение: после ADR-0021 v4-ссылка строк не несёт вовсе, и
+ * worklist приходит по HTTPS через `queue-client.js` уже после того, как окно открылось.
  */
 /**
  * MO-TM30-HELPER-VERSIONING §5 Layer 1 — "is there a newer release", asked once at startup.
@@ -143,8 +145,14 @@ function broadcastUpdateNotice() {
  * NON-BLOCKING by design (§5's table): a newer release existing is not a reason to stop someone
  * filing. The hard block is Layer 2, which fires only when a LINK says it needs more.
  *
- * The one outbound request this app makes besides the human-initiated sheet download (014 §2.5),
- * on a short timeout, failing silently in every direction: a version check that can take the
+ * The only outbound request this app makes to a THIRD PARTY, and the only one still issued
+ * inline in this file. After ADR-0021 the Helper's full network surface is four calls: this
+ * release check, the version report, the worklist fetch and the `submitted` write — the last
+ * three all go to OUR backend through `queue-client.js`, which is the single place a token and
+ * a URL meet. (`checkForNewerRelease` stays out of that module deliberately: no token, no error
+ * kinds, no caller that reacts — see the header of `queue-client.js`.)
+ *
+ * On a short timeout, failing silently in every direction: a version check that can take the
  * Helper down is worse than no version check.
  */
 const RELEASES_API = 'https://api.github.com/repos/neuro-logic-dev/tm30-helper/releases/latest';
@@ -218,7 +226,8 @@ let reportToken = null;
  * queue whatsoever. Null until some link has taught us stays a SUPPORTED state — the Helper is
  * then exactly the offline shell it was before ADR-0021.
  *
- * 🔴 The FETCH that uses it is task Q-5's, not this file's yet. This is the memo half only.
+ * 🔴 The FETCH that uses it now lives in this file too: `tm30:fetch-worklist` below hands this
+ * base and the token to `queue-client.js`. This declaration is still only the memo half.
  */
 let apiBase = null;
 
@@ -692,9 +701,10 @@ function handleDeepLink(url) {
      * link this build is too old for still leaves the Helper paired — that operator is precisely
      * the one who will next launch from the Dock and need a queue there.
      *
-     * ⚠️ On this branch the gate refuses every v4 link anyway: a v4 payload's floor is 2.5.0 and
-     * `package.json` is still 2.4.0 (the version bump is Q-7's, out of scope here). That is the
-     * intended state until the release that ships the fetch — the pairing still lands.
+     * The gate lets v4 through from 2.5.0 on, which is what `package.json` now says (Q-7). While
+     * this branch sat at 2.4.0 the gate refused every v4 link and only the pairing landed — the
+     * intended pre-release state, now closed. `test/roundtrip.test.mjs` (h4) keeps it closed:
+     * shipping below `TM30_MIN_HELPER_VERSION_V4` while this case exists is a red test.
      */
     case DeepLinkKind.V4:
       console.log(
@@ -721,9 +731,12 @@ function handleDeepLink(url) {
 }
 
 // ---------- A-WEB-4d: скачивание листа + открытие папки ----------
-// Единственное сетевое действие хелпера — скачивание файла, инициированное человеком
-// (005 §8.3.1: «лист скачивается локально, дальше человек грузит его в портал руками»).
-// Никаких data-fetch'ей: 014 §2.5 остаётся в силе.
+// Скачивание файла, инициированное ЧЕЛОВЕКОМ (005 §8.3.1: «лист скачивается локально, дальше
+// человек грузит его в портал руками»). Раньше здесь стояло «единственное сетевое действие
+// хелпера, никаких data-fetch'ей» — после ADR-0021 это неправда: хелпер проверяет релизы на
+// GitHub, репортит свою версию, тянет worklist и пишет `submitted`. Три последних идут в наш
+// бэкенд через `queue-client.js`. Верно лишь то, что ЭТА загрузка по-прежнему запускается
+// человеком и ничего не тянет фоном.
 
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 
@@ -804,8 +817,9 @@ ipcMain.handle('tm30:download-sheet', (event, rawUrl) => {
  * `{ok:false}` и НИЧЕГО не очищено.
  *
  * `session.fromPartition` создаёт партицию, если её ещё нет — очистка пустой партиции
- * корректна и честно возвращает ok. Это не сетевой вызов хелпера (014 §2.5): стирается
- * локальное хранилище, ни одного байта наружу.
+ * корректна и честно возвращает ok. Сети здесь нет вообще: стирается локальное хранилище,
+ * ни одного байта наружу. (Сетевые вызовы у хелпера есть — они в `queue-client.js` и в
+ * `checkForNewerRelease`, ADR-0021; этот глагол к ним отношения не имеет.)
  */
 ipcMain.handle('tm30:reset-portal-session', async (_event, partition) => {
   if (typeof partition !== 'string' || !partition.startsWith('persist:tm30-')) {

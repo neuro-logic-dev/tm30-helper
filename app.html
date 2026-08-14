@@ -30,13 +30,20 @@
 
       ── What this file deliberately is NOT ──────────────────────────────────────────────────
       · 4i — portal submit detection. Not accepted into iteration 1 (orchestrator 2026-07-17).
-      · a recorder of `submitted`. 4f hands `return_url` to the browser and the WEB records it via
-        endpoint #9 (005 §8.4). The Helper never learns the outcome — see `markSubmitted`.
+      · an ORIGINATOR of network calls. It still makes none itself — see the constraint below —
+        but it is no longer true that the Helper never learns a filing's outcome: ADR-0023 lets
+        the Helper record `submitted` directly, and this file asks main to do it (`submitFiling`).
+        The browser hand-back survives as the FALLBACK for token-less rows — see `markSubmitted`.
 
       ── Constraints this file is built under ────────────────────────────────────────────────
-      · ZERO Helper network calls (014 §2.5). Everything rendered comes out of the deep-link
-        payload, which main.js already parsed and passed in as `?d=<base64url(JSON)>`. The
-        `<webview>` navigating to the portal is the HUMAN's browser session, not a Helper fetch.
+      · No network call is made FROM THIS FILE (014 §2.5, narrowed by ADR-0021). The blanket
+        "the Helper makes zero network calls" rule this line used to state is DEAD: the app now
+        checks GitHub for a newer release, reports its version, fetches the worklist and posts
+        `submitted`. All four are made by the MAIN process — the backend three through
+        `queue-client.js`, the release check inline in `main.js` — and this renderer reaches them
+        only through the named `preload.js` verbs, receiving outcomes and never a URL or a token.
+        Rows may still arrive as a bootstrap `?d=<base64url(JSON)>` payload from a v2/v3 link.
+        The `<webview>` navigating to the portal is the HUMAN's browser session, not a Helper fetch.
       · Portal NO-GO (010 §8). No DOM automation, no auto-submit, no captcha interaction.
       · NO credentials is the NORMAL state (creds start empty, PO 2026-07-20). The window must
         render fine without `account`, and the right pane still shows the portal for manual
@@ -2750,8 +2757,10 @@
       // │  answer is no.                                                                     │
       // └────────────────────────────────────────────────────────────────────────────────────┘
       //
-      // Still ZERO Helper network calls (014 §2.5): this injects script into the page the
-      // HUMAN's webview session already loaded. Nothing is fetched.
+      // Still not a network call (014 §2.5, narrowed by ADR-0021): this injects script into the
+      // page the HUMAN's webview session already loaded. Nothing is fetched. The Helper's real
+      // outbound surface — release check, version report, worklist fetch, submitted write — lives
+      // in the main process and never touches the portal.
       // ═══════════════════════════════════════════════════════════════════════════════════
 
       /** v1's cadences, kept (`window.html:192,209`) — they are field-proven against the portal. */
