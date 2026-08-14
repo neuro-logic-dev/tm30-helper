@@ -127,6 +127,45 @@ test('precedence is unchanged: finished → blocked → local → urgency', () =
     assert.equal(rowState(row({ dot: 'overdue' })), 'downloaded');
 });
 
+/**
+ * 🔴 ADR-0023 — THE REGRESSION THIS FILE NOW GUARDS.
+ *
+ * `rowState` used to read `local.submitted`, a flag the Helper set on itself the moment it had
+ * opened a browser. A row therefore reached `awaiting` — the art that means "sent to immigration"
+ * — on the strength of nothing but a click, and then sat there looking finished while the server
+ * still said `sheet_ready`. Production: 0 of 13 filings ever actually transitioned, in a queue
+ * whose rows looked increasingly done.
+ *
+ * The server's word is now the only one. This is asserted at the level that would show the lie —
+ * the ROW ART — because that is what an operator reads, and a future "small convenience" that
+ * re-introduced a local flag would be caught here rather than in a review.
+ */
+test('🔴 a local `submitted` flag no longer moves a row — only the server\'s status does', () => {
+    const api = sandbox();
+    const { rowState, state } = api;
+
+    state.rowLocal[1] = { submitted: true };
+    assert.equal(
+        rowState(row({ filing_id: 1, dot: 'due' })),
+        'need',
+        'a Helper-local flag must not produce the "sent to immigration" art',
+    );
+    assert.notEqual(rowState(row({ filing_id: 1, dot: 'overdue' })), 'awaiting');
+    assert.equal(rowState(row({ filing_id: 1, dot: 'overdue' })), 'overdue', 'still urgent');
+
+    // The server saying so is a different matter entirely.
+    assert.equal(rowState(row({ filing_id: 1, dot: 'due', status: 'submitted' })), 'awaiting');
+});
+
+test('the header count is unmoved by a local flag too — it counts what the server owes', () => {
+    const api = sandbox();
+    api.state.rowLocal[1] = { submitted: true };
+    api.state.worklist = [row({ filing_id: 1, dot: 'due' }), row({ filing_id: 2, dot: 'overdue' })];
+    api.renderCount();
+    // Two rows are still owed. A local tick used to silently remove one from this number.
+    assert.equal(api.countText(), '2 to file · 1 overdue');
+});
+
 // ── priorityRank / byPriority ───────────────────────────────────────────────────────────
 
 test('🔴 rank comes from the DOT alone — never from a second reading of the calendar', () => {

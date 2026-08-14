@@ -344,9 +344,61 @@ test('AC-7/AC-12: a pointer link stores its token in report_token, and the addre
         future_key: { by: '2.9.0' }, // 🔴 the union write, unchanged
         report_token: TOKEN,
         api_base: API_BASE,
+        // Q-5: written by `ensureInstallationId` because a report now actually goes out — see the
+        // assertion below and the test that follows it.
+        installation_id: readFile().installation_id,
     });
+    assert.match(readFile().installation_id, /^[0-9a-f-]{36}$/, 'a real uuid, generated once');
     assert.equal('token' in readFile(), false, 'ONE token on disk, under the name it already had');
-    assert.equal(calls.length, 0, 'no report address was ever taught — so nothing is sent');
+    /*
+      🔴 RETARGETED BY Q-5 (orchestrator decision, Tier-2, 2026-08-14). This read
+      `calls.length === 0, 'no report address was ever taught — so nothing is sent'`, which was
+      true while nothing could derive one. C-1 gives a pointer no `report_url`, so that rule meant
+      an operator whose queue is always large enough to emit v4 would silently stop reporting a
+      Helper version. `main.js` now composes the endpoint from `api_base` — the same
+      rebuild-from-a-base move v3 rows make for sheet and return URLs — so a v4-only pairing
+      reports like any other. The both-or-neither rule is intact: still no token, still silence.
+    */
+    assert.equal(calls.length, 1, 'a v4-only pairing still reports its version');
+    assert.equal(calls[0].url, `${API_BASE}/tm30/helper-report`, 'derived, never hardcoded');
+    assert.equal(calls[0].body.token, TOKEN);
+});
+
+test('🔴 a v4-only pairing reports its version — the address is DERIVED from api_base', () => {
+    // The regression this pins: a pointer carries no `report_url`, so the both-or-neither guard
+    // used to silence the report for exactly the operators whose queues outgrew v3.
+    freshLaunch();
+    const calls = recordFetch();
+
+    main.handleDeepLink(link(v4()));
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `${API_BASE}/tm30/helper-report`);
+    assert.equal(calls[0].body.token, TOKEN);
+    assert.equal(main.resolveReportUrl(), `${API_BASE}/tm30/helper-report`);
+});
+
+test('a stored report_url always wins over the one api_base implies', () => {
+    // Stated outright beats inferred: an operator whose backend serves the report from somewhere
+    // else must not have that overridden by a derivation.
+    freshLaunch({ report_url: 'https://elsewhere.mo.example/report', report_token: TOKEN });
+    const calls = recordFetch();
+    main.loadReportDetails();
+
+    main.handleDeepLink(link(v4()));
+
+    assert.equal(main.resolveReportUrl(), 'https://elsewhere.mo.example/report');
+    assert.equal(calls[0].url, 'https://elsewhere.mo.example/report');
+});
+
+test('no token and no base ⇒ still silence, and no file is invented', () => {
+    freshLaunch();
+    const calls = recordFetch();
+
+    main.reportVersion();
+
+    assert.equal(calls.length, 0, 'nothing was ever taught — the Helper says nothing at all');
+    assert.equal(main.resolveReportUrl(), null);
 });
 
 test('a pointer opens no window and, above all, no broken-link dialog', () => {
@@ -396,7 +448,13 @@ test('the memo is read back on the next launch: the same pointer twice writes on
     main.loadReportDetails();
     main.handleDeepLink(link(v4()));
 
-    assert.deepEqual(readFile(), { report_token: TOKEN, api_base: API_BASE });
+    // Q-5: `installation_id` joins the memo because a v4 pairing now reports (see above). It is
+    // generated ONCE and read back on the second launch, which is why the file is not rewritten.
+    assert.deepEqual(readFile(), {
+        report_token: TOKEN,
+        api_base: API_BASE,
+        installation_id: readFile().installation_id,
+    });
     assert.equal(fs.statSync(statePath()).mtimeMs, first, 'already known — nothing was rewritten');
 });
 

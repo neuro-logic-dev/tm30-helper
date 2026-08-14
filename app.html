@@ -189,6 +189,64 @@
       .pane-head h3 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: 0.02em; }
       .pane-head .count { font-size: 11px; color: var(--faint); font-family: var(--mono); }
 
+      /* ── Q-5: the queue is live data, so the head says how old it is ─────────────────── */
+      .q-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .q-t { display: flex; align-items: baseline; gap: 8px; }
+      /*
+        🔴 The freshness line. A queue fetched over the network can be stale, and a stale queue
+        that looks current is the failure this line exists to prevent — so it states the wall
+        clock AND the relative age, which is the half an operator actually reads.
+      */
+      .q-sub { font-size: 10.5px; color: var(--faint); font-family: var(--mono); }
+      .q-sub:empty { display: none; }
+      .btn-refresh {
+        font: 500 11.5px/1 var(--ui);
+        color: var(--accent-ink);
+        background: var(--accent-soft);
+        border: 1px solid var(--accent);
+        border-radius: 4px;
+        padding: 5px 9px;
+        cursor: pointer;
+        flex: none;
+      }
+      .btn-refresh:hover:not([disabled]) { filter: brightness(0.97); }
+      .btn-refresh[disabled] { opacity: 0.5; cursor: default; }
+      .btn-refresh[hidden] { display: none; }
+
+      /*
+        The queue banner — states 4 and 5. It sits ABOVE the list rather than inside it, because
+        it is a statement about the whole queue, and it must survive the list having rows in it.
+      */
+      .qbanner {
+        display: flex;
+        gap: 9px;
+        align-items: flex-start;
+        padding: 10px 12px;
+        font-size: 12px;
+        border-bottom: 1px solid var(--line);
+        flex: 0 0 auto;
+      }
+      .qbanner[hidden] { display: none; }
+      .qbanner.err { background: var(--overdue-bg); color: var(--overdue); }
+      .qbanner.warn { background: var(--due-bg); color: var(--due); }
+      .qbanner .bt { font-weight: 650; }
+      .qbanner .bbody { min-width: 0; }
+      .qbanner .bbtn {
+        margin-left: auto;
+        font: 500 11px/1 var(--ui);
+        border: 1px solid currentColor;
+        color: inherit;
+        background: var(--surface);
+        border-radius: 4px;
+        padding: 5px 9px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex: none;
+      }
+      .qbanner .bbtn[disabled] { opacity: 0.5; cursor: default; }
+      /* State 6's "all clear" — the good state, and it must read as one. */
+      .empty .badge.b-ok { background: var(--ok-bg); color: var(--ok); }
+
       .list {
         flex: 1;
         overflow-y: auto;
@@ -396,6 +454,14 @@
       /* Not italic — it was the only slanted type here, and italic in a dense list reads as an
          error rather than as an explanation. */
       .rowmsg { font-size: 11px; color: var(--muted); order: 1; }
+      /* AC-11a — the server's refusal, on the row it belongs to. */
+      .rowmsg.err {
+        color: var(--overdue);
+        background: var(--surface);
+        border: 1px solid var(--overdue);
+        border-radius: 4px;
+        padding: 5px 7px;
+      }
 
       /*
         ── session bar (Q2) — the active villa's portal session, in the portal pane ────────
@@ -608,10 +674,24 @@
     <div class="panes">
       <!-- LEFT — the worklist container. 4d fills this with villa groups. -->
       <section class="pane-l" aria-label="Worklist">
+        <!--
+          Q-5 — the header strip. The count is unchanged (`renderCount`, ADR-0014: it measures
+          work owed, not rows present). What is new beside it is the freshness line, because from
+          ADR-0021 these rows are FETCHED and can therefore be out of date, and the Refresh that
+          forces a re-fetch by hand. There is no timer behind either of them (AC-5).
+        -->
         <div class="pane-head">
-          <h3>to do</h3>
-          <span class="count" id="count">—</span>
+          <div class="q-id">
+            <div class="q-t">
+              <h3>to do</h3>
+              <span class="count" id="count">—</span>
+            </div>
+            <div class="q-sub" id="q-sub"></div>
+          </div>
+          <button type="button" class="btn-refresh" id="btn-refresh" hidden>Refresh</button>
         </div>
+        <!-- States 4 and 5 — a statement about the whole queue, never about one row. -->
+        <div class="qbanner" id="qbanner" hidden></div>
         <div class="list" id="list"></div>
       </section>
 
@@ -767,6 +847,66 @@
          * moment the selection moves, so it can never describe the wrong villa's portal.
          */
         portalStatus: null,
+
+        // ── Q-5 additions (ADR-0021) ────────────────────────────────────────────────────
+        /**
+         * 🔴 WHAT THIS WINDOW KNOWS ABOUT ITS OWN QUEUE. The whole of states 1–6 is a function
+         * of this object, which is why it is one object and not six booleans.
+         *
+         * · `paired`  — main holds a token AND a base. The renderer never sees either; it is
+         *               told this boolean by `getQueueStatus()` and set to false again the
+         *               moment a 401 says the token has been discarded (AC-4: do not retry).
+         * · `phase`   — `idle` → `loading` → `ready` | `failed` | `revoked`. 🔴 `ready` is the
+         *               ONLY phase in which an empty list may be presented as "nothing due";
+         *               every other empty list is a gap, and AC-3 forbids dressing a gap as an
+         *               answer about the operator's work.
+         * · `fetchedAt` — when the last SUCCESSFUL fetch landed, or null if none ever has. The
+         *               freshness line is computed from it at render time, never on a timer.
+         * · `error`   — `{kind, status, message}` of the last failure, `kind` from `QUEUE_ERROR`.
+         * · `inFlight`— one fetch at a time. Four triggers can fire (AC-5) and window focus can
+         *               fire twice in a breath, so the guard lives here rather than at each.
+         */
+        queue: {
+          paired: false,
+          phase: 'idle',
+          fetchedAt: null,
+          error: null,
+          inFlight: false,
+        },
+        /**
+         * The `filing_id` whose submit is in flight, or null. ONE at a time is not a limitation
+         * to lift later: the artifact's rule is that only THAT row's controls lock while every
+         * other row stays workable, and a second concurrent submit would be a second row lying
+         * about which request it is waiting for.
+         */
+        submitBusy: null,
+        /**
+         * The focus a link asked for, before we know whether the queue contains it.
+         *
+         * Split from `focusFilingId` because the answer now arrives LATER than the boot: the
+         * rows come from a fetch, so at first paint there is nothing to resolve the id against.
+         * It is applied once, on the first fetch that contains it, and dropped once applied.
+         */
+        pendingFocusId: null,
+      };
+
+      /**
+       * 🔴 `queue-client.js`'s `ErrorKind`, mirrored — and PINNED against the original by
+       * `test/queue-window.test.mjs`, which requires both and asserts they are deep-equal.
+       *
+       * Why a mirror at all: this renderer runs with `contextIsolation` on and a sandboxed
+       * preload, so it cannot `require` a CommonJS module, and C-8 is frozen at three verbs — so
+       * there is no seam to hand the table across. The rule the order sets ("switch on the
+       * constants, never on string literals") is what matters, and a typo in `'unauthorised'`
+       * still cannot silently fall through to the wrong branch: it fails the pinning test loudly
+       * instead, which is the same protection the constant gives on the main side.
+       */
+      var QUEUE_ERROR = {
+        NETWORK: 'network',
+        TIMEOUT: 'timeout',
+        UNAUTHORIZED: 'unauthorized',
+        REFUSED: 'refused',
+        SERVER: 'server',
       };
 
       var listeners = [];
@@ -780,6 +920,9 @@
         upddismiss: document.getElementById('upddismiss'),
         list: document.getElementById('list'),
         count: document.getElementById('count'),
+        qsub: document.getElementById('q-sub'),
+        qbanner: document.getElementById('qbanner'),
+        refresh: document.getElementById('btn-refresh'),
         statusline: document.getElementById('statusline'),
         viewport: document.getElementById('viewport'),
         portalMsg: document.getElementById('portal-msg'),
@@ -1081,7 +1224,14 @@
       function rowState(row) {
         var local = state.rowLocal[row.filing_id];
         if (row.status === 'acknowledged') return 'approved';
-        if (row.status === 'submitted' || (local && local.submitted)) return 'awaiting';
+        /*
+          🔴 ADR-0023 — `local.submitted` is GONE from this line. A row reached `awaiting` on the
+          Helper's own say-so the moment a browser opened, and then sat there looking finished
+          while the server still said `sheet_ready`. `row.status` is the server's word and now the
+          only one: a submit changes this row by being confirmed and re-fetched, never by being
+          clicked.
+        */
+        if (row.status === 'submitted') return 'awaiting';
         if (!row.sheet_download_url) return 'nosheet';
         if (local && local.downloadPath) return 'downloaded';
         if (row.dot === 'overdue') return 'overdue';
@@ -1274,26 +1424,30 @@
       }
 
       /**
-       * ✓ Mark as submitted — A-WEB-4f, THE HAND-BACK (005 §8.4).
+       * ✓ Mark as submitted — THE HAND-BACK (005 §8.4), now the FALLBACK path only.
        *
-       * 🔴 THIS FUNCTION OPENS A URL. THAT IS THE WHOLE FEATURE.
-       * `return_url` goes to the operator's DEFAULT BROWSER — never the portal `<webview>`, never
-       * a Helper request. The browser is where the manager's logged-in mo-reservation-fe session
-       * lives; the webview holds a Thai-immigration session and knows nothing about our cookies.
-       * The web tab then reads `confirm=submitted`, opens its confirm panel, takes the optional
-       * receipt number, and calls endpoint #9 with the user who is actually signed in.
+       * 🔴 SUPERSEDED BY ADR-0023 (2026-08-14). Read this before restoring anything below.
        *
-       * WHY THE HELPER DOES NOT CALL #9 ITSELF: iteration 1 gives the Helper no credentials and
-       * no network (014 §2.5 — it could not authenticate the attestation even if it wanted to),
-       * and `submitted_by` must be a real human's assent, captured where that human is
-       * identified. Iteration 2 (005 §8.4) revisits this with a short-lived token; not now.
+       * This function used to be the only way a filing could ever reach `submitted`, under a
+       * ruling that said the Helper must not make the attestation itself: it had no credentials
+       * and no network, and `submitted_by` had to be a real human's assent captured where that
+       * human is identified. ADR-0021 removed the first half of that premise — the Helper now
+       * holds an operator-bound token — and production removed the second: in the whole life of
+       * the feature, 0 of 13 filings ever transitioned, because the three-click, three-context
+       * flow (Helper → browser tab → Confirm) was never worked. An attestation with a weaker
+       * identity proof beats an attestation that is never captured at all.
        *
-       * ⚠️ WHAT THE OPTIMISTIC FLIP DOES AND DOES NOT MEAN. `local.submitted` is set only after
-       * the OS confirms it opened the browser — that is the last fact the Helper ever learns.
-       * Whether the manager then pressed Confirm, typed a receipt, or closed the tab is
-       * invisible from here. So the flag is DISPLAY-ONLY (`local`, never persisted, never sent),
-       * the row says so in words, and the button stays live to reopen the confirm. The true
-       * status arrives the only way it can: the next worklist regenerated from the web.
+       * So `submitFiling` below is now the primary path, and this one survives for exactly the
+       * case ADR-0023 leaves it: a row that has NO token path — an old-style launch, where the
+       * queue came in the link and no `api_base`/token came with it. Such a row still carries a
+       * `return_url`, and the browser is still the only place its status can be recorded.
+       *
+       * 🔴 THE OPTIMISTIC FLIP IS GONE. `local.submitted` used to be set here the moment the OS
+       * confirmed it had opened a browser — the last fact the Helper ever learned — and the row
+       * then LOOKED done while the server still said `sheet_ready`. That is what let rows sit
+       * "submitted" for weeks in a queue that never shrank. The status line still reports the
+       * hand-off, because opening the browser is a real thing that happened; the ROW says
+       * nothing, because nothing about the row has been established.
        */
       function markSubmitted(row) {
         var local = (state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {});
@@ -1314,13 +1468,352 @@
         window.tm30Native.openExternal(row.return_url).then(function (res) {
           if (res && res.ok) {
             local.handbackError = null;
-            local.submitted = true; // optimistic, display-only — see the ⚠️ above
             setStatusNote('opened the web confirm in your browser — finish it there', 'st-ok');
           } else {
             local.handbackError = (res && res.error) || 'unknown error';
             setStatusNote('could not open your browser — ' + local.handbackError, 'st-none');
           }
           renderList();
+        });
+      }
+
+      // ── Q-5: the fetched queue (ADR-0021) ──────────────────────────────────────────────
+
+      /**
+       * Can this row be closed from here, without a browser?
+       *
+       * Paired means main holds a token and a base, which is exactly what the POST needs. The two
+       * paths are complementary and never both absent: a FETCHED row has a token path and no
+       * `return_url` (the fetch response carries no web origin to build one from), and a LINKED
+       * row has a `return_url` and — on an old-style launch — no token.
+       */
+      function canSubmitDirect(row) {
+        return state.queue.paired && Number.isFinite(row.filing_id);
+      }
+
+      /**
+       * How long ago, in the words the artifact uses.
+       *
+       * 🔴 Computed at RENDER time from a stored instant, never ticked by a timer — AC-5 allows
+       * exactly four re-fetch triggers and no background clock, and a clock that only repaints a
+       * label is still a clock somebody would later be tempted to hang a fetch on.
+       */
+      function relativeAge(deltaMs) {
+        if (!Number.isFinite(deltaMs) || deltaMs < 0) return 'just now';
+        var sec = Math.floor(deltaMs / 1000);
+        if (sec < 10) return 'just now';
+        if (sec < 60) return 'a moment ago';
+        var min = Math.floor(sec / 60);
+        if (min < 60) return min + ' min ago';
+        return Math.floor(min / 60) + ' h ago';
+      }
+
+      /**
+       * The freshness line: `refreshed 12:04 · a moment ago`.
+       *
+       * 🔴 "0 tasks" is only trustworthy alongside when it was checked, which is why this line
+       * stays visible in the EMPTY state — it is the single detail that separates state 6 from
+       * state 4. After a failure the verb changes to `last loaded`, because what the clock names
+       * is no longer when we refreshed but when we last succeeded.
+       *
+       * No successful fetch has ever landed ⇒ empty string, and the line hides itself (`:empty`):
+       * a link-payload window has nothing to date, and inventing a timestamp for it would be the
+       * exact lie the line exists to prevent.
+       */
+      function freshnessText(queue, now) {
+        if (queue.phase === 'revoked') return 'not connected';
+        if (!queue.fetchedAt) return '';
+        var at = new Date(queue.fetchedAt);
+        var clock =
+          String(at.getHours()).padStart(2, '0') + ':' + String(at.getMinutes()).padStart(2, '0');
+        var verb = queue.phase === 'failed' ? 'last loaded' : 'refreshed';
+        return verb + ' ' + clock + ' · ' + relativeAge(now - queue.fetchedAt);
+      }
+
+      /**
+       * The banner above the list — states 4 and 5, or null when there is nothing to announce.
+       *
+       * 🔴 The two are deliberately different in tone and in remedy. A failed fetch is RED and
+       * offers Retry, because retrying is the fix. A revoked token is AMBER and offers a trip to
+       * MO, because nothing is broken — access simply ended, and retrying against a dead key is
+       * how a queue looks empty forever.
+       */
+      function queueNotice(queue) {
+        if (queue.phase === 'failed') {
+          return {
+            tone: 'err',
+            title: 'Could not load the queue',
+            body: 'No answer from the server. Check the connection and try again.',
+            action: 'Retry',
+          };
+        }
+        if (queue.phase === 'revoked') {
+          return {
+            tone: 'warn',
+            title: 'Access to the queue has ended',
+            body: 'Open the Helper once from MO to reconnect this computer.',
+            action: 'Open MO',
+          };
+        }
+        return null;
+      }
+
+      /**
+       * What stands where the rows would be, when there are none.
+       *
+       * 🔴 AC-3 IN ONE FUNCTION: states 4 and 6 must not share a single line of text. "No tasks"
+       * is a claim about the operator's world; a failed fetch has made no such claim and must not
+       * borrow the words of one. The `loading` case exists because the honest answer between the
+       * launch and the first response is "not yet", and "all clear" would be a guess.
+       */
+      function queuePlaceholder(queue, rowCount) {
+        if (rowCount > 0) return null;
+        if (queue.phase === 'failed') {
+          return {
+            heading: 'Nothing to show yet',
+            body:
+              'The queue could not be loaded, so this list is not a statement about your work — ' +
+              'it is a gap.',
+          };
+        }
+        if (queue.phase === 'revoked') {
+          return {
+            heading: 'Queue disconnected',
+            body: 'The saved key was discarded. Your villa sessions and the portal below are untouched.',
+          };
+        }
+        if (queue.phase === 'loading' || queue.phase === 'idle') {
+          return { heading: 'Loading the queue…', body: '' };
+        }
+        return {
+          badge: 'all clear',
+          body: 'Nothing waiting to be filed. New arrivals appear here once their sheet is ready.',
+        };
+      }
+
+      /** The OS window title. `— no tasks` is a fact; a count we do not have is left unsaid. */
+      function windowTitle(queue, rowCount) {
+        if (queue.phase !== 'ready') return 'TM30 Helper';
+        if (!rowCount) return 'TM30 Helper — no tasks';
+        return 'TM30 Helper — ' + rowCount + ' task' + (rowCount === 1 ? '' : 's');
+      }
+
+      /** The head strip + the banner. Everything that describes the QUEUE rather than a row. */
+      function renderQueueChrome() {
+        var q = state.queue;
+        el.qsub.textContent = freshnessText(q, Date.now());
+        document.title = windowTitle(q, (state.worklist || []).length);
+
+        // No token ⇒ nothing to refresh, and after a 401 the button would only retry a dead key.
+        el.refresh.hidden = !q.paired;
+        el.refresh.disabled = q.inFlight;
+        el.refresh.textContent = q.inFlight ? 'Refreshing…' : 'Refresh';
+
+        var notice = queueNotice(q);
+        el.qbanner.textContent = '';
+        el.qbanner.hidden = !notice;
+        if (!notice) return;
+
+        el.qbanner.className = 'qbanner ' + notice.tone;
+        var body = document.createElement('div');
+        body.className = 'bbody';
+        var title = document.createElement('span');
+        title.className = 'bt';
+        title.textContent = notice.title;
+        body.appendChild(title);
+        body.appendChild(document.createElement('br'));
+        body.appendChild(document.createTextNode(notice.body));
+        el.qbanner.appendChild(body);
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'bbtn';
+        btn.textContent = notice.action;
+        if (q.phase === 'failed') {
+          btn.disabled = q.inFlight;
+          btn.addEventListener('click', function () { refreshQueue('retry'); });
+        } else {
+          // State 5's one action. The address came from main at window birth; without it the
+          // button says so rather than pretending to be a way out.
+          var installUrl = new URLSearchParams(location.search).get('install');
+          btn.disabled = !installUrl || !window.tm30Native;
+          if (btn.disabled) {
+            btn.title = 'This Helper has not been told where MO lives — open it from the web app.';
+          } else {
+            btn.addEventListener('click', function () {
+              window.tm30Native.openExternal(installUrl);
+            });
+          }
+        }
+        el.qbanner.appendChild(btn);
+      }
+
+      /** Everything the queue owns, repainted. Called after every fetch and every submit. */
+      function renderQueue() {
+        renderList();
+        renderCount();
+        renderQueueChrome();
+      }
+
+      /**
+       * T3-03, deferred — the focus a link named, applied to FETCHED rows.
+       *
+       * The link no longer arrives with the rows in it, so an id can only be resolved once a
+       * fetch has landed. Applied ONCE (the slot is cleared), and only when the row is genuinely
+       * present: a stale id must highlight nothing rather than the wrong row. The villa
+       * auto-select is the same call a human click makes, exactly as at boot.
+       */
+      function applyPendingFocus() {
+        if (state.pendingFocusId === null) return;
+        var wanted = state.pendingFocusId;
+        for (var i = 0; i < state.worklist.length; i += 1) {
+          if (state.worklist[i].filing_id === wanted) {
+            state.pendingFocusId = null;
+            state.focusFilingId = wanted;
+            setActiveVilla(state.worklist[i].villa);
+            return;
+          }
+        }
+      }
+
+      /**
+       * 🔴 AC-5 — THE ONLY WAY ROWS EVER CHANGE. Four callers and no fifth: launch, window focus,
+       * the Refresh button, and a successful submit. There is no timer in this file that touches
+       * it, and adding one is a decision for a human, not a convenience.
+       *
+       * Unpaired ⇒ returns immediately, and that is not an error: an old-style launch works from
+       * the payload it was given, exactly as it did before ADR-0021.
+       *
+       * A body without an `items` array is a FAILURE, never `{items: []}`. `queue-client.js`
+       * already refuses to fabricate an empty queue out of an unreadable answer; this is the same
+       * rule applied one layer up, where a `200` with a shape we do not recognise would otherwise
+       * repaint the list as "all clear".
+       */
+      function refreshQueue(reason) {
+        var q = state.queue;
+        if (!q.paired || !window.tm30Native) return;
+        if (q.inFlight) return; // focus can fire twice in a breath; one request answers both
+
+        q.inFlight = true;
+        if (q.phase === 'idle') q.phase = 'loading';
+        renderQueueChrome();
+
+        window.tm30Native.fetchWorklist().then(function (res) {
+          q.inFlight = false;
+
+          if (res && res.ok && res.worklist && Array.isArray(res.worklist.items)) {
+            // AC-16: the rows go in UNTOUCHED. A field this build never heard of stays inert
+            // rather than being dropped on the way through.
+            state.worklist = res.worklist.items;
+            q.phase = 'ready';
+            q.fetchedAt = Date.now();
+            q.error = null;
+            /*
+              🔴 …except the re-fetch a refusal itself triggered. That reload is part of showing
+              the refusal — it is what makes the count drop and the stale row vanish — so wiping
+              the message with it would mean the operator never reads why their click failed.
+              The message clears on the NEXT successful fetch, or when they retry the row.
+            */
+            if (reason !== 'after-refusal') clearRowRefusals();
+            applyPendingFocus();
+            renderQueue();
+            return;
+          }
+
+          if (res && res.ok) {
+            q.error = { kind: QUEUE_ERROR.SERVER, status: 200 };
+            q.phase = 'failed';
+            console.error('[tm30-helper] the worklist response had no items array');
+            renderQueue();
+            return;
+          }
+
+          var kind = (res && res.kind) || QUEUE_ERROR.NETWORK;
+          q.error = { kind: kind, status: res && res.status, message: res && res.message };
+          if (kind === QUEUE_ERROR.UNAUTHORIZED) {
+            /*
+              AC-4 — main has already discarded the token by the time this lands. Dropping
+              `paired` here is what makes "SHALL NOT retry silently" structural rather than a
+              promise: every trigger goes through the guard above, so focus, Retry and a submit
+              all become no-ops until a launch from the web app re-pairs this machine.
+            */
+            q.phase = 'revoked';
+            q.paired = false;
+          } else {
+            q.phase = 'failed';
+          }
+          console.error(
+            '[tm30-helper] worklist fetch failed:', kind, 'HTTP', (res && res.status) || 0
+          );
+          renderQueue();
+        });
+      }
+
+      /**
+       * A refusal describes a picture that has just been replaced, so it never outlives the fetch
+       * that followed it — "the message clears on the next successful fetch". The other local
+       * facts (a downloaded path, an insert result) survive: they are about files on this machine
+       * and are still true.
+       */
+      function clearRowRefusals() {
+        for (var id in state.rowLocal) {
+          if (state.rowLocal[id]) state.rowLocal[id].submitError = null;
+        }
+      }
+
+      /**
+       * 🔴 ADR-0023 / AC-11 — THE REAL SUBMIT. One click, no browser, and no local truth.
+       *
+       * What this does NOT do, and the reason the whole feature exists: it does not write a
+       * "submitted" flag anywhere on this side. The row changes because the SERVER stopped
+       * listing it, which the re-fetch below discovers. Between the click and that answer the row
+       * says `Submitting…` and locks its own controls — and nothing else on screen locks, so the
+       * operator keeps working while one request is out.
+       *
+       * AC-11a: a refusal is the server's own sentence, put on the row it belongs to rather than
+       * in a toast that outlives its context, and followed by a re-fetch — a refusal means this
+       * window's picture is out of date, and the stale row usually vanishes with the reload.
+       */
+      function submitFiling(row) {
+        if (state.submitBusy !== null) return; // one in flight; the row's buttons already say so
+        if (!window.tm30Native) return;
+        var local = (state.rowLocal[row.filing_id] = state.rowLocal[row.filing_id] || {});
+
+        state.submitBusy = row.filing_id;
+        local.submitError = null;
+        renderList();
+
+        window.tm30Native.markSubmitted(row.filing_id, {}).then(function (res) {
+          state.submitBusy = null;
+
+          if (res && res.ok) {
+            setStatusNote('submitted ✓ · reloading the queue', 'st-ok');
+            renderList();
+            refreshQueue('submitted'); // AC-5's fourth trigger — the row disappears here
+            return;
+          }
+
+          var kind = (res && res.kind) || QUEUE_ERROR.NETWORK;
+          if (kind === QUEUE_ERROR.UNAUTHORIZED) {
+            // The token died mid-click. State 5 owns the whole window from here; a per-row
+            // message would be describing the wrong scale of problem.
+            state.queue.phase = 'revoked';
+            state.queue.paired = false;
+            state.queue.error = { kind: kind, status: res && res.status };
+            renderQueue();
+            return;
+          }
+
+          if (kind === QUEUE_ERROR.REFUSED && res.message) {
+            local.submitError = res.message; // 🔴 VERBATIM. The Helper never paraphrases a refusal.
+          } else if (kind === QUEUE_ERROR.REFUSED) {
+            local.submitError = 'The server declined this transition.';
+          } else {
+            local.submitError = 'Could not reach the server — the filing was not changed.';
+          }
+          renderList();
+          // Even a network failure re-reads: we no longer know what the server thinks of this row.
+          refreshQueue('after-refusal');
         });
       }
 
@@ -1331,6 +1824,12 @@
         var kind = rowState(row);
         var art = STATE_ART[kind];
         var local = state.rowLocal[row.filing_id] || {};
+        /*
+          State 2 — this row, and only this row, is waiting on the server. Every other row stays
+          fully workable: the operator can keep filing while one request is out, which is the
+          whole reason the lock is per-row rather than per-window.
+        */
+        var submitting = state.submitBusy === row.filing_id;
 
         var box = document.createElement('div');
         box.className = 'row ' + art.row + (row.villa === state.activeVilla ? ' sel' : '');
@@ -1445,25 +1944,51 @@
           statusBtn.classList.add('done');
           setLabel(statusBtn, 'check', 'Approved');
           statusBtn.disabled = true;
-        } else if (kind === 'awaiting' && !(local.submitted && row.status !== 'submitted')) {
+        } else if (kind === 'awaiting') {
+          /*
+            🔴 ADR-0023 — the `Reopen confirm` branch that used to live here is DELETED with the
+            optimistic flag that produced it. A row is only `awaiting` when the SERVER says
+            `submitted`, so there is nothing left to reopen and nothing the Helper is unsure
+            about: the sentence "it cannot see whether you confirmed" described a state that no
+            longer exists.
+          */
           statusBtn.classList.add('done');
           setLabel(statusBtn, 'check', 'Submitted');
           statusBtn.disabled = true;
-        } else if (kind === 'awaiting') {
+        } else if (submitting) {
+          /*
+            State 2 — in flight. The label is the whole feedback, and the control is dead until
+            the server answers: nothing about this row has been asserted yet.
+          */
+          statusBtn.classList.add('primary');
+          setLabel(statusBtn, 'check', 'Submitting…');
+          statusBtn.disabled = true;
+        } else if (canSubmitDirect(row)) {
           /**
-           * 4f: `submitted` here is the LOCAL optimistic flag, not the server's — we opened the
-           * browser and then went blind. A dead `✓ Submitted` would be the Helper claiming an
-           * outcome it never saw, and would strand an operator whose browser tab got closed
-           * before they confirmed. So the control stays live and says exactly what it is.
+           * 🔴 ADR-0023 — THE ONE CLICK. This posts. It does not open a browser, and it does not
+           * write anything locally: `submitFiling` locks this row, waits, and lets the re-fetch
+           * decide what the row becomes.
+           *
+           * The lock semantics below are 4e's, unchanged and for 4e's reasons: a locked villa
+           * DIMS the invitation (`.locked`, outlined not filled) and never disables the control,
+           * because a session entry only proves that WE autofilled — an operator who typed the
+           * password by hand, or works a cred-less villa, has genuinely filed and must still be
+           * able to say so. The only hard disable is `nosheet`: nothing was uploaded, so there is
+           * nothing to attest.
            */
-          setLabel(statusBtn, 'external', 'Reopen confirm');
-          statusBtn.title =
-            'The Helper only opened your browser — it cannot see whether you confirmed. ' +
-            'Reopen the web confirm if you did not finish it.';
-          statusBtn.disabled = !canHandBack(row);
+          var lockedNow = isLocked(row.villa);
+          statusBtn.classList.add('primary');
+          if (lockedNow) {
+            statusBtn.classList.add('locked');
+            statusBtn.title =
+              'Log in to this villa in the portal first — select the villa and solve the ' +
+              'captcha. You can still mark it submitted if you logged in by hand.';
+          }
+          setLabel(statusBtn, lockedNow ? 'lock' : 'check', 'Mark submitted');
+          statusBtn.disabled = kind === 'nosheet';
           statusBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            markSubmitted(row);
+            submitFiling(row);
           });
         } else {
           /**
@@ -1536,6 +2061,9 @@
         insertBtn.setAttribute('data-villa', row.villa);
         if (row.sheet_download_url) insertBtn.setAttribute('data-has-sheet', '1');
         syncInsertButton(insertBtn);
+        // State 2: "its three buttons disable". Applied AFTER `syncInsertButton`, which owns the
+        // insert's own reasons for being dead and must not have this one folded into it.
+        if (submitting) insertBtn.disabled = true;
         insertBtn.addEventListener('click', function (e) {
           e.stopPropagation();
           insertSheet(row, insertBtn);
@@ -1560,7 +2088,7 @@
         folderBtn.title = 'Open the Drive folder';
         folderBtn.title = 'Open the Drive folder';
         folderBtn.setAttribute('aria-label', 'Open the Drive folder');
-        folderBtn.disabled = !row.folder_url;
+        folderBtn.disabled = !row.folder_url || submitting;
         folderBtn.addEventListener('click', function (e) {
           e.stopPropagation();
           openFolder(row);
@@ -1573,22 +2101,44 @@
 
         // ── the explanatory line, when the state has something to say ──
         var msg = '';
-        if (local.handbackError) msg = 'hand-back failed — ' + local.handbackError;
-        else if (kind !== 'approved' && row.status !== 'submitted' && !canHandBack(row))
-          // 4f: stated on the row, not just hidden in a tooltip on a greyed button.
+        var msgErr = false;
+        if (local.submitError) {
+          /*
+            🔴 AC-11a — THE SERVER'S OWN WORDS, first in the list because a refused click is the
+            most recent thing the operator did and the thing they are looking for an answer to.
+            Not paraphrased, not prefixed: "Cannot mark submitted: filing is submitted, not
+            sheet_ready" is a sentence the backend wrote about this filing, and the Helper's guess
+            at what it meant would be strictly less useful.
+          */
+          msg = local.submitError;
+          msgErr = true;
+        } else if (local.handbackError) msg = 'hand-back failed — ' + local.handbackError;
+        else if (
+          kind !== 'approved' &&
+          row.status !== 'submitted' &&
+          !canSubmitDirect(row) &&
+          !canHandBack(row)
+        )
+          /*
+            4f: stated on the row, not just hidden in a tooltip on a greyed button. Now guarded by
+            `!canSubmitDirect` as well: a FETCHED row carries no `return_url` by construction (the
+            worklist response has no web origin to build one from) and does not need one — it has
+            the token path instead. Announcing a missing link it never wanted would be an error
+            message about a road not taken.
+          */
           msg = 'No usable return link on this row — reopen the Helper from the web tab.';
         else if (local.insertError)
           // T3-08: already carries the do-NOT-submit instruction when verification failed.
           msg = 'insert failed — ' + local.insertError;
         else if (local.downloadError) msg = 'download failed — ' + local.downloadError;
-        else if (local.submitted && row.status !== 'submitted')
-          /**
-           * 🔴 The Helper's honesty line (4f). It opened a browser and learned nothing after
-           * that, so it must not read like `✓ Submitted` — the server's own word, which arrives
-           * only with the next worklist.
-           */
-          msg = 'Marked here after opening the web confirm — the Helper cannot see whether it ' +
-                'was recorded. The real status comes back with the next worklist.';
+        /*
+          ── DELETED by ADR-0023: the 4f "honesty line" ──────────────────────────────────────
+          It read "Marked here after opening the web confirm — the Helper cannot see whether it
+          was recorded", and it was the most honest part of a dishonest state: the row had ALREADY
+          flipped to `awaiting` on nothing but a browser having opened, and this sentence existed
+          to apologise for it. With `local.submitted` retired the apology has no subject — a row
+          now changes only when the server says so, and there is nothing left to disclaim.
+        */
         else if (local.insert)
           msg = 'inserted into the portal ✓ ' + local.insert.filename +
                 ' — submission stays yours, in the portal pane.';
@@ -1599,7 +2149,8 @@
 
         if (msg) {
           var line = document.createElement('div');
-          line.className = 'rowmsg';
+          // A refusal is not a footnote — it is drawn as an error box on the row (state 3).
+          line.className = msgErr ? 'rowmsg err' : 'rowmsg';
           line.textContent = msg;
           box.appendChild(line);
         }
@@ -1625,14 +2176,36 @@
       function renderList() {
         el.list.textContent = '';
 
+        /*
+          🔴 AC-3 — AN EMPTY LIST IS NOT ONE STATE. It used to be: "Nothing to file today · every
+          filing within the next 24 hours is submitted", said whatever the reason the list was
+          empty. With the rows now fetched, an empty list can mean the queue is genuinely clear,
+          that the fetch failed, that access was revoked, or that the answer has not arrived yet —
+          and only the first of those is a statement about the operator's work. `queuePlaceholder`
+          owns that distinction and guarantees states 4 and 6 share no line of text.
+        */
         if (!state.worklist.length) {
+          var placeholder = queuePlaceholder(state.queue, 0);
           var empty = document.createElement('div');
           empty.className = 'empty';
-          empty.innerHTML =
-            '<div style="font-size:26px">✓</div>' +
-            '<div class="big">Nothing to file today</div>' +
-            '<div class="sm">Every filing within the next 24 hours is submitted. ' +
-            'Re-open from the web to refresh this list.</div>';
+          if (placeholder.badge) {
+            var ok = document.createElement('span');
+            ok.className = 'badge b-ok';
+            ok.textContent = placeholder.badge;
+            empty.appendChild(ok);
+          }
+          if (placeholder.heading) {
+            var big = document.createElement('div');
+            big.className = 'big';
+            big.textContent = placeholder.heading;
+            empty.appendChild(big);
+          }
+          if (placeholder.body) {
+            var sm = document.createElement('div');
+            sm.className = 'sm';
+            sm.textContent = placeholder.body;
+            empty.appendChild(sm);
+          }
           el.list.appendChild(empty);
           return;
         }
@@ -2818,9 +3391,17 @@
           // seen. The list is flat now, so every row is already on screen and there is nothing
           // left to open — `.row.focused` and the scroll-into-view below do the rest.
         } else {
-          console.warn(
+          /*
+            ADR-0021 — NOT an error any more, and usually not even unusual. The window can now
+            boot with no rows at all (a Dock launch, or a v4 pointer), so an id that is absent
+            here is normally just an id whose row has not been fetched yet. It is parked and
+            applied by the first fetch that contains it; a genuinely stale id is simply never
+            matched, and highlights nothing — which is what it did before.
+          */
+          state.pendingFocusId = payload.focus_filing_id;
+          console.log(
             '[tm30-helper] focus_filing_id ' + payload.focus_filing_id +
-              ' is not in this worklist — opening unfocused'
+              ' is not in the boot payload — will resolve it against the fetched queue'
           );
         }
       }
@@ -2829,6 +3410,7 @@
       renderUpdateBar(); // before the list: the strip changes the body layout
       armUpdateInstall(); // may reveal the strip on its own, by a different route
       renderCount(); // reads `state.worklist` directly — no ordering dependency on renderList
+      renderQueueChrome(); // the head strip, before we know whether a fetch is even possible
       renderStatusLine();
       // 🔴 4g: mountPortal BEFORE mountAutofill — their `onActiveVillaChange` subscriptions run
       // in registration order, and 4e's must find the villa's pool webview already created and
@@ -2840,6 +3422,50 @@
       // does not matter. The banner dismiss-on-click is bound here, once.
       mountAutoInsert();
       el.insertBanner.addEventListener('click', hideInsertBanner);
+
+      /**
+       * 🔴 ADR-0021 — BOOTSTRAP, THEN FETCH. The window no longer gets its truth from its query.
+       *
+       * Whatever rows the launch carried have already been painted above — that is the instant
+       * first paint, and it is all a v2/v3 link is good for now. The fetch below is issued
+       * immediately and its result REPLACES them, because the link is a snapshot of a queue that
+       * has been moving since it was built, and the operator is working the queue, not the
+       * snapshot. An unpaired Helper keeps the rows it was handed and never fetches: that is the
+       * old behaviour, preserved exactly, for the launch that has no token.
+       *
+       * `getQueueStatus()` is asked rather than assumed because the answer is main's to give: the
+       * token and the base live there, and this renderer must never hold either.
+       */
+      if (window.tm30Native && window.tm30Native.getQueueStatus) {
+        window.tm30Native.getQueueStatus().then(function (status) {
+          state.queue.paired = Boolean(status && status.paired);
+          if (state.queue.paired) {
+            refreshQueue('launch'); // AC-5, trigger 1
+          } else {
+            // Nothing will ever arrive, so the list stops waiting for it. Any rows on screen came
+            // from the link and are as fresh as this window will ever be.
+            state.queue.phase = 'ready';
+            renderQueue();
+          }
+        });
+      } else {
+        state.queue.phase = 'ready';
+        renderQueue();
+      }
+
+      /**
+       * AC-5, trigger 2 — OS focus. The operator has been in the portal, or in a browser, or in
+       * MO marking things from the other side; coming back to this window is the moment its
+       * picture is most likely to be out of date.
+       *
+       * 🔴 There is no third listener and no timer. `refreshQueue` guards on `inFlight`, so the
+       * bursts of focus events a window manager can produce cost one request between them, and an
+       * unpaired or revoked window ignores this entirely.
+       */
+      window.addEventListener('focus', function () { refreshQueue('focus'); });
+
+      // AC-5, trigger 3 — the manual force. The only refresh an operator can see.
+      el.refresh.addEventListener('click', function () { refreshQueue('manual'); });
 
       /**
        * T3-03: the one-time INITIAL-BOOT auto-select — deliberately the SAME call a human villa
@@ -2905,6 +3531,19 @@
         markSubmitted: markSubmitted,
         /** Whether a row carries a usable `return_url` at all (014 §7.9). */
         canHandBack: canHandBack,
+
+        // ── Q-5 (ADR-0021 / ADR-0023) ───────────────────────────────────────────────────
+        /** The one re-fetch entry point. AC-5's four triggers all come through here. */
+        refreshQueue: refreshQueue,
+        /** The real submit: POST, then re-fetch. Never writes a local "submitted". */
+        submitFiling: submitFiling,
+        /** Whether this row can be closed without a browser (paired ⇒ the token path exists). */
+        canSubmitDirect: canSubmitDirect,
+        /** The head strip's freshness line, so a harness can read what the operator reads. */
+        freshnessText: freshnessText,
+        /** The banner (states 4/5) and the empty-list copy (states 4/5/6), as data. */
+        queueNotice: queueNotice,
+        queuePlaceholder: queuePlaceholder,
 
         // ── T3-11 ─────────────────────────────────────────────────────────────────────
         /** Which row auto-insert would file for a villa (or none) — asserted by the harness. */
