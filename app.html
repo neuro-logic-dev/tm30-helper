@@ -54,7 +54,7 @@
     -->
     <style>
       /*
-       * Palette re-based onto the web app so the Helper and the dashboard read as one
+       * Palette re-based onto mo-reservation-fe so the Helper and the dashboard read as one
        * product. Three things changed, and only these:
        *
        *  • The neutral ramp is Tailwind `slate`, the same one the web app settled on. The old
@@ -62,7 +62,7 @@
        *    look like a slightly dirty version of it when the two windows sit side by side.
        *  • The status colours are the web app's badge severities, hex for hex, so "overdue" is
        *    the same red here as on the reservation row that sent you here.
-       *  • The accent is the dashboard's gold — what it uses to mark the thing you are on. It is
+       *  • The accent is MO gold — what the dashboard uses to mark the thing you are on. It is
        *    a MARK, not a fill: gold under white text fails contrast, so solid buttons take
        *    `--primary` and gold text on a gold wash takes the darker `--accent-ink`.
        *
@@ -111,7 +111,7 @@
       }
 
       /*
-        The update strip (TM30-HELPER-VERSIONING §5 Layer 1). Amber, above BOTH panes, because
+        The update strip (MO-TM30-HELPER-VERSIONING §5 Layer 1). Amber, above BOTH panes, because
         it is about the application rather than about any filing — putting it inside the worklist
         would make it compete with the rows for the same glance.
         Dismissible for the session only: the next launch asks again, because the reason it
@@ -2294,7 +2294,7 @@
       }
 
       /**
-       * TM30-HELPER-VERSIONING §5 Layer 1 — paint the "newer release exists" strip.
+       * MO-TM30-HELPER-VERSIONING §5 Layer 1 — paint the "newer release exists" strip.
        *
        * 🔴 The COMPARISON is not done here. `main.js` already decided, and passes `upd` only when
        * it is both parseable and genuinely newer — so this function cannot disagree with the main
@@ -3153,7 +3153,7 @@
       //   · A loud verify failure does NOT auto-retry: manual ⇥ stays the retry path, unchanged.
       // ═══════════════════════════════════════════════════════════════════════════════════
 
-      // ── TM30-PORTAL-DATE — the Check-in Date fill (ADR-0011) ───────────────────────────
+      // ── MO-TM30-PORTAL-DATE — the Check-in Date fill (ADR-0011) ───────────────────────────
       //
       // ┌─ 🔴 PORTAL NO-GO still holds (010 §8) ─────────────────────────────────────────────┐
       // │ This adds ONE DOM write: the value of the import form's `checkInDate` input. It     │
@@ -3495,7 +3495,7 @@
 
       /**
        * AC-5, trigger 2 — OS focus. The operator has been in the portal, or in a browser, or in
-       * the web app marking things from the other side; coming back to this window is the moment its
+       * MO marking things from the other side; coming back to this window is the moment its
        * picture is most likely to be out of date.
        *
        * 🔴 There is no third listener and no timer. `refreshQueue` guards on `inFlight`, so the
