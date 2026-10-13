@@ -6,15 +6,16 @@
 #   • test/mock-portal/*.test.mjs — the mock portal's own unit tests (xlsx validation + server).
 #   • test/*.test.mjs MINUS the seam test — deep-link parsing v1..v4, the queue client, the queue
 #     window's pure functions, the version report, row rendering, portal dates. Added 2026-08-14
-#     (MO-TM30-QUEUE): until then this gate ran none of them, so every one of those suites was
+#     (TM30-QUEUE): until then this gate ran none of them, so every one of those suites was
 #     green only on whichever machine last happened to run it.
 #   • test/run-insert.sh   — T3-08/T3-11 ⇥ insert + auto-insert, driving the REAL app.html /
 #     preload.js / insert-sheet.js in a REAL Electron window against the local mock portal.
 #   • test/run-autofill.sh — 4e autofill wiring + timing, same shape.
+#   • scripts/brand-guard.mjs — the brand leak guard (ADR-0031), sources and app.asar files.
 #
 # WHAT CANNOT RUN HERE, and it is not an oversight:
 #   • test/run.sh (emitter↔parser seam) and test/run-handback.sh both COMPILE web sources
-#     (`src/lib/tm30.ts`, `src/lib/reservation-url.ts`) out of mo-reservation-fe, which is a
+#     (`src/lib/tm30.ts`, `src/lib/reservation-url.ts`) out of the web app repo, which is a
 #     PRIVATE repository. Reaching it from here needs a long-lived cross-repo PAT. Those two
 #     stay a manual pre-release step (see README "Release"). The drift they guard against is a
 #     WEB-side change anyway, so their natural home is the web repo's CI, which can check this
@@ -75,6 +76,11 @@ jobs:
 
       - run: npm ci
 
+      # Brand leak guard (ADR-0031): no tenant brand in anything that ships in app.asar, the repo
+      # docs or these workflows. First, because it needs nothing but Node and fails in a second.
+      - name: Brand leak guard
+        run: npm run brand:check && npm run brand:check:artifacts
+
       - name: Mock-portal unit tests
         run: node --test 'test/mock-portal/*.test.mjs'
 
@@ -85,7 +91,7 @@ jobs:
       #
       # `roundtrip.test.mjs` is EXCLUDED, and that is the one exception this list is allowed to
       # have: it imports the web emitter compiled by `test/run.sh` into `test/.build`, out of the
-      # PRIVATE mo-reservation-fe repo. Without that build it does not skip, it FAILS — correctly,
+      # PRIVATE web app repo. Without that build it does not skip, it FAILS — correctly,
       # since a seam test with nothing on the other side of the seam has proven nothing. It stays
       # the manual pre-release step RELEASING.md already requires.
       #

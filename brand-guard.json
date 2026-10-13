@@ -1,0 +1,90 @@
+{
+  "_doc": [
+    "Brand leak guard config (ADR-0031). Run: node scripts/brand-guard.mjs --src | --artifacts.",
+    "forbidden: brand strings of any tenant; the list is IDENTICAL in villas-be-core, mo-reservation-fe, mo-packages and tm30-helper — change all four together.",
+    "allow / allowLines / exclude: every entry must say why the string never reaches a user. No skip flag exists by design."
+  ],
+  "forbidden": [
+    {
+      "id": "mo-word",
+      "pattern": "(?<![\\p{L}\\p{N}_])MO(?![\\p{L}\\p{N}_])",
+      "flags": "u"
+    },
+    {
+      "id": "mo-real-estate",
+      "pattern": "\\bmo[\\s._-]*real[\\s._-]*estate",
+      "flags": "i"
+    },
+    {
+      "id": "more-real-estate",
+      "pattern": "\\bmore[\\s._-]*real[\\s._-]*estate",
+      "flags": "i"
+    },
+    {
+      "id": "mo-estate",
+      "pattern": "\\bmo[\\s._-]?estate",
+      "flags": "i"
+    },
+    {
+      "id": "mo-bank-account",
+      "pattern": "\\bmo[\\s_-]*bank[\\s_-]*account",
+      "flags": "i"
+    },
+    {
+      "id": "samui-host",
+      "pattern": "samui[\\s._-]*host",
+      "flags": "i"
+    },
+    {
+      "id": "mo-email",
+      "pattern": "[\\w.+-]*\\bmo\\b[\\w.+-]*@[\\w-]+(?:\\.[\\w-]+)+",
+      "flags": "i"
+    },
+    {
+      "id": "tenant-people",
+      "pattern": "moimmobilier|\\bmoimb\\b|itsnattha|supattra|wongsawat|korpyleva|zhikharev",
+      "flags": "i"
+    },
+    {
+      "id": "mo-kebab",
+      "pattern": "\\bmo-[a-z][\\w-]*"
+    },
+    {
+      "id": "mo-camel",
+      "pattern": "\\b(?:[a-z][a-z0-9]*(?:[A-Z][a-z0-9]+)*)?Mo[A-Z][a-z][\\w$]*|\\bmo[A-Z][a-z][\\w$]*"
+    },
+    {
+      "id": "mo-snake",
+      "pattern": "(?<![\\p{L}\\p{N}$])mo_[\\w$]*|[\\w$]*_mo(?![\\p{Ll}\\p{N}])[\\w$]*",
+      "flags": "u"
+    },
+    {
+      "id": "mo-const",
+      "pattern": "\\bMO_[A-Z0-9_]+|\\b[A-Z0-9_]*_MO\\b"
+    }
+  ],
+  "src": {
+    "_doc": "Everything that ends up in app.asar (package.json build.files) plus the public-facing repo docs and CI (release notes are generated there). Comments are NOT stripped: app.asar ships the files as they are.",
+    "includeFromPackageJson": "build.files",
+    "include": [
+      "package.json",
+      "README.md",
+      "RELEASING.md",
+      ".github/workflows"
+    ]
+  },
+  "artifacts": {
+    "_doc": "The files electron-builder packs into app.asar, read from package.json build.files (node_modules is third-party and never scanned). Comments are NOT stripped.",
+    "includeFromPackageJson": "build.files",
+    "include": [
+      "package.json"
+    ]
+  },
+  "allowLines": [
+    {
+      "file": "package.json",
+      "contains": "\"appId\": \"com.moestate.tm30helper\"",
+      "reason": "electron-builder appId is the install identity (upgrade path, protocol registration); ADR-0031 Guidance keeps it unchanged. It is not shown in any window"
+    }
+  ]
+}
