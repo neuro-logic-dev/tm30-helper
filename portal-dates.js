@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * TM30-PORTAL-DATE — the date the Helper types into the portal's `วันที่เข้าพัก / Check-in Date`.
+ * MO-TM30-PORTAL-DATE — the date the Helper types into the portal's `วันที่เข้าพัก / Check-in Date`.
  *
  * The rule is the operator's, recorded in ADR-0011: check-in today → today; any earlier check-in →
  * YESTERDAY, however much earlier it actually was; a future check-in → nothing at all, because a
