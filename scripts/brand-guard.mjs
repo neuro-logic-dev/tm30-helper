@@ -88,6 +88,9 @@ function compileGlobs(globs) {
 const matchesAny = (rel, compiled) => compiled.some((c) => c.re.test(rel));
 
 function walk(root, base, out) {
+  // Third-party code is never scanned, even when an include pattern points into it
+  // (electron-builder's build.files lists `node_modules/**/*`).
+  if (base.split('/').some((seg) => seg === 'node_modules' || seg === '.git')) return;
   const abs = path.join(root, base);
   let st;
   try { st = fs.statSync(abs); } catch { return; }
