@@ -7,7 +7,8 @@
   "forbidden": [
     {
       "id": "mo-word",
-      "pattern": "\\bMO\\b"
+      "pattern": "(?<![\\p{L}\\p{N}_])MO(?![\\p{L}\\p{N}_])",
+      "flags": "u"
     },
     {
       "id": "mo-real-estate",
@@ -54,7 +55,8 @@
     },
     {
       "id": "mo-snake",
-      "pattern": "(?<![A-Za-z0-9$])mo_[\\w$]*|[\\w$]*_mo(?![a-z0-9])[\\w$]*"
+      "pattern": "(?<![\\p{L}\\p{N}$])mo_[\\w$]*|[\\w$]*_mo(?![\\p{Ll}\\p{N}])[\\w$]*",
+      "flags": "u"
     },
     {
       "id": "mo-const",
