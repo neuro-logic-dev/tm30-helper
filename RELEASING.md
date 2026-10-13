@@ -70,7 +70,7 @@ download an update it then fails to install, on every check, forever. With no fe
 ## Before you press the button
 
 Bump nothing by hand — `plan` does it and `publish` commits it. Do run the two suites CI
-cannot (both compile sources out of the private `mo-reservation-fe`):
+cannot (both compile sources out of the private web app repository):
 
 ```bash
 ./test/run.sh            # emitter ↔ parser seam
