@@ -6,8 +6,13 @@
   "author": "TM30 Helper",
   "scripts": {
     "start": "electron .",
+    "brand:check": "node scripts/brand-guard.mjs --src",
+    "brand:check:artifacts": "node scripts/brand-guard.mjs --artifacts",
+    "predist": "npm run brand:check:artifacts",
     "dist": "electron-builder --mac --win",
+    "predist:mac": "npm run brand:check:artifacts",
     "dist:mac": "electron-builder --mac",
+    "predist:win": "npm run brand:check:artifacts",
     "dist:win": "electron-builder --win"
   },
   "build": {

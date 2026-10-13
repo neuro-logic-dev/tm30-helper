@@ -16,9 +16,11 @@
  * timed out, having asserted nothing, and **exited 0**. A suite that cannot find the code it
  * tests must fail loudly; that one passed silently.
  *
- * `$MO_WEB_ROOT`, if set, is AUTHORITATIVE: it is validated and then either used or thrown on,
+ * `$TM30_WEB_ROOT`, if set, is AUTHORITATIVE: it is validated and then either used or thrown on,
  * never quietly fallen back from. Falling back would reintroduce the failure this file exists to
- * remove — an explicit answer being wrong, and nothing saying so.
+ * remove — an explicit answer being wrong, and nothing saying so. The old name `$MO_WEB_ROOT` is
+ * still read, with the same authority, when `$TM30_WEB_ROOT` is unset — existing shells and CI
+ * setups keep working.
  *
  * Unset, the layouts this repo is actually checked out in are tried in order, first hit wins:
  *
@@ -49,13 +51,17 @@ const holdsMarker = (dir) => fs.existsSync(path.join(dir, MARKER));
  * @throws if nothing usable is found — listing every path tried, because "web root not found"
  *         without them is a bug report nobody can act on.
  */
+/** The override variable, new name first; the legacy name is kept so existing setups still work. */
+const ENV_NAMES = ['TM30_WEB_ROOT', 'MO_WEB_ROOT'];
+
 function resolveWebRoot() {
-  if (process.env.MO_WEB_ROOT) {
-    const pinned = path.resolve(process.env.MO_WEB_ROOT);
+  const envName = ENV_NAMES.find((name) => process.env[name]);
+  if (envName) {
+    const pinned = path.resolve(process.env[envName]);
     if (holdsMarker(pinned)) return pinned;
     throw new Error(
-      'MO_WEB_ROOT is set to ' + pinned + ', which has no ' + MARKER + '.\n' +
-        'Unset it to fall back to the known layouts, or point it at the mo-reservation-fe checkout.'
+      envName + ' is set to ' + pinned + ', which has no ' + MARKER + '.\n' +
+        'Unset it to fall back to the known layouts, or point it at the web app checkout.'
     );
   }
 
@@ -66,7 +72,7 @@ function resolveWebRoot() {
   throw new Error(
     'could not locate mo-reservation-fe — no known layout contains ' + MARKER + '.\n' +
       'Tried:\n' + LAYOUTS.map((c) => '  ' + c).join('\n') + '\n' +
-      'Set MO_WEB_ROOT to the web app checkout if it lives somewhere else.'
+      'Set TM30_WEB_ROOT to the web app checkout if it lives somewhere else.'
   );
 }
 
