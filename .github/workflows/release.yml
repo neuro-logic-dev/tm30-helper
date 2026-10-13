@@ -43,7 +43,7 @@ on:
 permissions:
   contents: write
 
-# Two releases in flight would race on the tag and on main. Queue, never cancel: a cancelled
+# Two releases in flight would race on the tag and on the release branch. Queue, never cancel: a cancelled
 # publish could leave a pushed tag without its release.
 concurrency:
   group: release
@@ -285,7 +285,7 @@ jobs:
           # which is exactly how v2.5.0's first attempt died (run 31803183144).
           git diff --cached --quiet || git commit -m "chore: release $VERSION"
           git tag -a "$TAG" -m "TM30 Helper $TAG"
-          git push origin "HEAD:main" --follow-tags
+          git push origin "HEAD:${{ github.ref_name }}" --follow-tags
 
       - uses: actions/download-artifact@v4
         with:
