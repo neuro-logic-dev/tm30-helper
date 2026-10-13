@@ -249,6 +249,11 @@
         cursor: pointer;
         white-space: nowrap;
         flex: none;
+        /* "Open {tenant}" — a long tenant name must not push the banner text out of the 360px
+           pane. Cut at 150px with an ellipsis; the full label is the button's title. */
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .qbanner .bbtn[disabled] { opacity: 0.5; cursor: default; }
       /* State 6's "all clear" — the good state, and it must read as one. */
@@ -776,6 +781,19 @@
       var TM30_URL =
         new URLSearchParams(location.search).get('portal') ||
         'https://tm30.immigration.go.th';
+
+      /**
+       * The tenant this window was opened for, handed over by main.js at birth (query `tenant`,
+       * `tenant_key`), both already normalised by deeplink.js. Absent ⇒ null: the button says
+       * "Open web app" and the portal partitions keep their pre-tenant names.
+       *  · TENANT_NAME is display-only and is only ever written with textContent / title.
+       *  · TENANT_KEY is never shown; it is re-checked here because it becomes a partition name.
+       */
+      var TENANT_NAME = new URLSearchParams(location.search).get('tenant') || null;
+      var TENANT_KEY = (function () {
+        var k = new URLSearchParams(location.search).get('tenant_key');
+        return k && /^[A-Za-z0-9_-]{1,32}$/.test(k) ? k : null;
+      })();
 
       // ── payload ────────────────────────────────────────────────────────────────────────
       // Same zero-dep mechanism v1 uses: main.js base64url-encodes the ALREADY-PARSED payload
@@ -1542,10 +1560,14 @@
        *
        * 🔴 The two are deliberately different in tone and in remedy. A failed fetch is RED and
        * offers Retry, because retrying is the fix. A revoked token is AMBER and offers a trip to
-       * MO, because nothing is broken — access simply ended, and retrying against a dead key is
-       * how a queue looks empty forever.
+       * the web app, because nothing is broken — access simply ended, and retrying against a
+       * dead key is how a queue looks empty forever.
+       *
+       * `tenantName` (normalised, or null) labels that one button and nothing else — the texts
+       * describe the Helper's state, not the tenant. Passed in, not read from a global, so the
+       * function stays pure and testable on its own.
        */
-      function queueNotice(queue) {
+      function queueNotice(queue, tenantName) {
         if (queue.phase === 'failed') {
           return {
             tone: 'err',
@@ -1558,8 +1580,10 @@
           return {
             tone: 'warn',
             title: 'Access to the queue has ended',
-            body: 'Open the Helper once from MO to reconnect this computer.',
-            action: 'Open MO',
+            body: 'Open the Helper once from your web app to reconnect this computer.',
+            // The ONLY place the tenant's name is shown (D1). It arrives normalised from main
+            // and is written with textContent / title below — never as markup.
+            action: 'Open ' + (tenantName || 'web app'),
           };
         }
         return null;
@@ -1616,7 +1640,7 @@
         el.refresh.disabled = q.inFlight;
         el.refresh.textContent = q.inFlight ? 'Refreshing…' : 'Refresh';
 
-        var notice = queueNotice(q);
+        var notice = queueNotice(q, TENANT_NAME);
         el.qbanner.textContent = '';
         el.qbanner.hidden = !notice;
         if (!notice) return;
@@ -1645,8 +1669,9 @@
           var installUrl = new URLSearchParams(location.search).get('install');
           btn.disabled = !installUrl || !window.tm30Native;
           if (btn.disabled) {
-            btn.title = 'This Helper has not been told where MO lives — open it from the web app.';
+            btn.title = "This Helper does not know your web app's address yet. Open it from the web app.";
           } else {
+            btn.title = notice.action;
             btn.addEventListener('click', function () {
               window.tm30Native.openExternal(installUrl);
             });
@@ -2441,9 +2466,15 @@
       //     navigation repaints villa B's urlbar.
       // ═══════════════════════════════════════════════════════════════════════════════════
 
-      /** The one partition scheme. main.js's reset handler trusts exactly this prefix. */
+      /**
+       * The one partition scheme. main.js's reset handler trusts the `persist:tm30-` prefix.
+       * With a tenant key the villa's jar is `persist:tm30-<key>-v-<villa>`, so the same villa
+       * name under two tenants never shares a portal login; without one it stays exactly the
+       * pre-tenant `persist:tm30-v-<villa>`, so existing logins survive the upgrade.
+       */
       function partitionFor(villa) {
-        return 'persist:tm30-v-' + encodeURIComponent(villa);
+        return 'persist:tm30-' + (TENANT_KEY ? TENANT_KEY + '-' : '') + 'v-' +
+          encodeURIComponent(villa);
       }
 
       /**
