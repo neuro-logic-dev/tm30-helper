@@ -573,9 +573,7 @@ app.whenReady().then(async () => {
   {
     const mainSrc = fs.readFileSync(path.join(HELPER, 'main.js'), 'utf8');
     check('main.js registers the SAME production engine (registerInsertSheet from ./insert-sheet)',
-      // The call may pass `{ tenantKeyFor }` (the per-window tenant key); it is the same engine.
-      /require\('\.\/insert-sheet'\)/.test(mainSrc) &&
-        /registerInsertSheet\((\{\s*tenantKeyFor:\s*\w+\s*\})?\);/.test(mainSrc));
+      /require\('\.\/insert-sheet'\)/.test(mainSrc) && /registerInsertSheet\(\)/.test(mainSrc));
     const preloadSrc = fs.readFileSync(path.join(HELPER, 'preload.js'), 'utf8');
     check('preload exposes the one new verb on the narrow bridge',
       /insertSheet:/.test(preloadSrc) && /'tm30:insert-sheet'/.test(preloadSrc));
