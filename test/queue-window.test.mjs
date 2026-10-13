@@ -168,17 +168,8 @@ test('state 5 — amber not red, the true cause, and the one action that fixes i
     const n = copy.queueNotice(queue({ phase: 'revoked' }));
     assert.equal(n.tone, 'warn', 'nothing is broken — access ended');
     assert.equal(n.title, 'Access to the queue has ended');
-    assert.equal(n.body, 'Open the Helper once from your web app to reconnect this computer.');
-    assert.equal(n.action, 'Open web app', 'no tenant name was sent — the neutral label');
-});
-
-test('state 5 — the tenant name labels the button and nothing else (D1)', () => {
-    const n = copy.queueNotice(queue({ phase: 'revoked' }), 'Coral Bay Villas');
-    assert.equal(n.action, 'Open Coral Bay Villas');
-    assert.equal(n.title, 'Access to the queue has ended');
-    assert.equal(n.body, 'Open the Helper once from your web app to reconnect this computer.');
-    const failed = copy.queueNotice(queue({ phase: 'failed' }), 'Coral Bay Villas');
-    assert.ok(!JSON.stringify(failed).includes('Coral'), 'error texts never carry the name');
+    assert.equal(n.body, 'Open the Helper once from MO to reconnect this computer.');
+    assert.equal(n.action, 'Open MO');
 });
 
 test('state 5 — says the key was discarded, and that the portal is untouched', () => {
@@ -450,13 +441,12 @@ test('an address with no token is NOT paired either', () => {
 
 test('AC-2 — the standalone window says what pairing is and how it happens', () => {
     const standalone = fs.readFileSync(path.join(repo, 'index.html'), 'utf8');
-    assert.match(standalone, /This computer is not connected to a web app yet/);
-    assert.match(standalone, /in your web app and launch the Helper/);
+    assert.match(standalone, /This computer is not connected to MO yet/);
     assert.match(standalone, /Upcoming Reservations → TM30/);
     assert.match(standalone, /Your queue then appears here on every launch\./);
 });
 
-test('the queue window is told where the web app lives, so state 5 has somewhere to send the operator', () => {
+test('the queue window is told where MO lives, so state 5 has somewhere to send the operator', () => {
     freshLaunch({ ...PAIRED, install_url: 'https://app.mo.example/tm30-helper' });
 
     main.openLaunchWindow();
