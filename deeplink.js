@@ -105,7 +105,7 @@ const trimSlashes = (s) => String(s).replace(/\/+$/, '');
  *
  * 🔴 THE CONSUMER HALF OF THE `c=` GUARD, which was missing until 2026-08-10.
  *
- * The emitter (the web app's `src/lib/tm30.ts` `tm30PayloadDigest`) has appended `&c=` to
+ * The emitter (`mo-reservation-fe/src/lib/tm30.ts` `tm30PayloadDigest`) has appended `&c=` to
  * every worklist link for as long as the digest has existed, and its docblock says exactly why:
  * the base64 round-trip below catches TRUNCATION but not SUBSTITUTION. Swapping one valid base64
  * character for another round-trips cleanly and very often still parses as JSON — measured there
@@ -287,51 +287,6 @@ function normalizeRowV3(row, index, bases, villas) {
     return out;
 }
 
-/** Longest `tenant_name` kept, in code points. Longer names keep 59 and gain an ellipsis. */
-const TENANT_NAME_MAX = 60;
-
-/**
- * The tenant's display name, as the Helper is allowed to show it — or `null` for "no name".
- *
- * DISPLAY-ONLY. The name decides nothing: not where the Helper connects (that is `api_base`), not
- * which portal session a villa gets (that is `tenant_key`). It only labels the "Open …" button,
- * and the renderer writes it with `textContent` / `title`, never as markup.
- *
- * The rule (MTU-4.3 mock §3):
- *  - not a string ⇒ null (the key stays off; the link is never refused over it);
- *  - C0 controls and DEL become a space; bidi marks/embeddings/isolates are removed, so a name
- *    cannot reorder the text around it;
- *  - whitespace runs collapse to one space, ends are trimmed;
- *  - empty after that ⇒ null, and the window says "web app";
- *  - over 60 code points ⇒ the first 59 plus "…". The full name is not kept anywhere.
- */
-function normalizeTenantName(raw) {
-    if (typeof raw !== 'string') return null;
-    const cleaned = raw
-        .replace(/[\u0000-\u001F\u007F]/g, ' ')
-        .replace(/[‎‏‪-‮⁦-⁩]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    if (cleaned === '') return null;
-    const points = Array.from(cleaned);
-    return points.length > TENANT_NAME_MAX
-        ? points.slice(0, TENANT_NAME_MAX - 1).join('') + '…'
-        : cleaned;
-}
-
-/**
- * The tenant's internal key, or `null`. Never shown to anyone.
- *
- * Strict on purpose: it becomes part of a webview partition name (`persist:tm30-<key>-v-<villa>`)
- * and of a directory path (`tm30-sheets/<key>/<filing_id>`), so anything outside
- * `[A-Za-z0-9_-]{1,32}` is dropped rather than repaired. Dropped means "no key", which keeps the
- * pre-tenant layout — never a refused link.
- */
-function normalizeTenantKey(raw) {
-    if (typeof raw !== 'string') return null;
-    return /^[A-Za-z0-9_-]{1,32}$/.test(raw) ? raw : null;
-}
-
 /**
  * @internal The OPTIONAL top-level keys a versioned payload may carry, applied to an
  * already-validated result. Shared by every version branch — v2, v3 and v4 — because none of
@@ -341,12 +296,12 @@ function normalizeTenantKey(raw) {
  * pointer, and a second copy of the version-gate's input is precisely how a v4 link would end up
  * silently un-gated. Every block below is verbatim what the v2/v3 branch ran inline before.
  *
- * All of them are TOLERANT: a junk value leaves the key OFF the result and is never a reason to
+ * All four are TOLERANT: a junk value leaves the key OFF the result and is never a reason to
  * fail a link. Absent is the normal state for all of them.
  */
 function applyOptionalKeys(result, payload) {
     /**
-     * TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
+     * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
      *
      * Expresses what Layer 1's "is there a newer release" cannot: *this particular link
      * requires ≥ X*. That is the honest signal when the web app has just started sending a
@@ -404,17 +359,6 @@ function applyOptionalKeys(result, payload) {
         result.focus_filing_id = payload.focus_filing_id;
     }
 
-    /**
-     * WHICH TENANT SENT THIS LINK — two optional keys, same tolerance as everything above: a junk
-     * value leaves the key off and never fails the link. A web app that does not send them (any
-     * deployment older than this field) gets exactly the pre-tenant behaviour: "Open web app",
-     * and the unprefixed portal partitions.
-     */
-    const tenantName = normalizeTenantName(payload.tenant_name);
-    if (tenantName !== null) result.tenant_name = tenantName;
-    const tenantKey = normalizeTenantKey(payload.tenant_key);
-    if (tenantKey !== null) result.tenant_key = tenantKey;
-
     return result;
 }
 
@@ -462,9 +406,8 @@ function parseV4Pointer(payload) {
  *
  * @param {string} url
  * @returns {{kind:'v1',account:object}
- *          |{kind:'v2',worklist:object[],focus_filing_id?:number,tenant_name?:string,tenant_key?:string}
- *          |{kind:'v4',api_base:string,token:string,focus_filing_id?:number,tenant_name?:string,
- *            tenant_key?:string}
+ *          |{kind:'v2',worklist:object[],focus_filing_id?:number}
+ *          |{kind:'v4',api_base:string,token:string,focus_filing_id?:number}
  *          |{kind:'chooser'}
  *          |{kind:'error',reason:string}
  *          |null} `null` ONLY when the URL is not a `tm30://` link at all (nothing to do);
@@ -582,12 +525,4 @@ function parseDeepLink(url) {
     return fail('link payload is neither a v1 account nor a v2/v3 worklist');
 }
 
-module.exports = {
-    parseDeepLink,
-    DeepLinkKind,
-    PROTOCOL,
-    payloadDigest,
-    compareVersions,
-    normalizeTenantName,
-    normalizeTenantKey,
-};
+module.exports = { parseDeepLink, DeepLinkKind, PROTOCOL, payloadDigest, compareVersions };

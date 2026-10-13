@@ -5,14 +5,7 @@ const { randomUUID } = require('crypto');
 
 const { autoUpdater } = require('electron-updater');
 
-const {
-  parseDeepLink,
-  DeepLinkKind,
-  PROTOCOL,
-  compareVersions,
-  normalizeTenantName,
-  normalizeTenantKey,
-} = require('./deeplink');
+const { parseDeepLink, DeepLinkKind, PROTOCOL, compareVersions } = require('./deeplink');
 const { registerInsertSheet } = require('./insert-sheet');
 const { createQueueClient, ErrorKind } = require('./queue-client');
 
@@ -37,7 +30,7 @@ if (process.defaultApp) {
 // ---------- Разбор deep link ----------
 // Формат: tm30://open?d=<base64url(JSON)>
 //   v1: {name, login, pass}          — legacy, поведение не менялось
-//   v2: {v:2, worklist:[...]}        — TM30-014 §7.3
+//   v2: {v:2, worklist:[...]}        — MO-TM30-014 §7.3
 //   v3: {v:3, rows:[...], villas, *_base} — ADR-0015, the compact shape. Normalised to the
 //       SAME rows by deeplink.js, so nothing below this line can tell the two apart.
 // Сам парсер живёт в ./deeplink.js — без зависимости от electron, чтобы его
@@ -141,7 +134,7 @@ function broadcastUpdateNotice() {
  * worklist приходит по HTTPS через `queue-client.js` уже после того, как окно открылось.
  */
 /**
- * TM30-HELPER-VERSIONING §5 Layer 1 — "is there a newer release", asked once at startup.
+ * MO-TM30-HELPER-VERSIONING §5 Layer 1 — "is there a newer release", asked once at startup.
  *
  * 🔴 WHY THIS EXISTS AT ALL, given the Helper auto-updates. It auto-updates on WINDOWS.
  * `build.mac.identity` is null, `build.mac.target` is dmg-only (electron-updater cannot update
@@ -238,24 +231,6 @@ let reportToken = null;
  */
 let apiBase = null;
 
-/**
- * WHICH TENANT the remembered pairing belongs to, as the last v2/v3/v4 link said — or null.
- *
- * One Helper build serves every tenant, so the only place a tenant's name may come from is the
- * link its own web app sent. Both are optional on the wire; null is the normal state for a web
- * app that does not send them, and the window then says "web app".
- *
- *  - `tenantName` — DISPLAY-ONLY: the label of the "Open …" button. Already normalised by
- *    `deeplink.js`; re-normalised on the way out of the memo, which sits in a writable directory.
- *  - `tenantKey`  — never shown. It prefixes the villa portal partitions and the per-task sheet
- *    directory, so the same villa name under two tenants never shares a portal login.
- *
- * They travel WITH the pairing: a link that carries none of them clears both, otherwise the
- * previous tenant's name would sit on the next tenant's button.
- */
-let tenantName = null;
-let tenantKey = null;
-
 function stateFilePath() {
   return path.join(app.getPath('userData'), STATE_FILENAME);
 }
@@ -320,7 +295,7 @@ function deriveInstallPage(worklist) {
  *  2. **A row's `sheet_download_url` gives it away.** That is what makes a v2/v3 link BOOTSTRAP
  *     material rather than merely a snapshot (AC-14): the deployment that BUILT the sheet URL is
  *     the one asked to answer for the queue. It is byte-for-byte the emitter's own rule
- *     (`resolveApiBase` in the web app's `src/lib/tm30.ts`), which is also how v3's `api_base`
+ *     (`resolveApiBase`, `mo-reservation-fe/src/lib/tm30.ts`), which is also how v3's `api_base`
  *     header is computed in the first place — so an origin derived here equals the header a v3
  *     payload carries, and nothing is lost by reading the rows instead of the header.
  *
@@ -380,8 +355,6 @@ function loadReportDetails() {
     reportToken = state.report_token;
   }
   if (isHttpUrl(state.api_base)) apiBase = state.api_base;
-  tenantName = normalizeTenantName(state.tenant_name);
-  tenantKey = normalizeTenantKey(state.tenant_key);
 }
 
 /**
@@ -433,20 +406,6 @@ function rememberReportDetails(result) {
   if (base && base !== apiBase) {
     apiBase = base;
     patch.api_base = base;
-  }
-
-  // The tenant this link speaks for — replaced as a pair, and REMOVED when the link names none
-  // (`undefined` drops the key in `writeState`). Only a versioned link reaches this function, and
-  // every versioned link comes from some tenant's web app, so silence here means "no name".
-  const name = typeof result.tenant_name === 'string' ? result.tenant_name : null;
-  const key = typeof result.tenant_key === 'string' ? result.tenant_key : null;
-  if (name !== tenantName) {
-    tenantName = name;
-    patch.tenant_name = name === null ? undefined : name;
-  }
-  if (key !== tenantKey) {
-    tenantKey = key;
-    patch.tenant_key = key === null ? undefined : key;
   }
 
   if (Object.keys(patch).length === 0) return; // already known — nothing to write
@@ -572,7 +531,7 @@ function discardReportToken() {
 }
 
 /**
- * TM30-HELPER-VERSIONING §5 Layer 2 — the per-link floor. BLOCKING.
+ * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the per-link floor. BLOCKING.
  *
  * Needs no network, which is the point: it answers "can this Helper honour THIS link" from the
  * link itself. Opening the worklist anyway would show a queue built by a payload this build only
@@ -613,20 +572,6 @@ function refusedForVersion(result, url) {
   return true;
 }
 
-/**
- * The tenant key each queue window was BORN with, by its webContents id.
- *
- * The window builds its portal partitions from the key in its query, once, at birth; a later link
- * from another tenant changes the memo but not that window. `insert-sheet.js` therefore asks for
- * the key of the window that is calling, not for the current memo, so the partition guard and the
- * sheet directory always agree with the partitions that window actually uses.
- */
-const windowTenantKeys = new Map();
-
-function tenantKeyForSender(sender) {
-  return (sender && windowTenantKeys.get(sender.id)) || null;
-}
-
 function openWorklistWindow(worklist, focusFilingId) {
   const win = new BrowserWindow({
     width: 1440,
@@ -651,7 +596,7 @@ function openWorklistWindow(worklist, focusFilingId) {
       // Unset ⇒ the param is absent ⇒ app.html falls back to the real portal URL, byte-identical.
       ...(process.env.TM30_PORTAL_BASE_URL ? { portal: process.env.TM30_PORTAL_BASE_URL } : {}),
       /*
-        ADR-0022 state 5 — WHERE "Open {tenant}" GOES when access is revoked.
+        ADR-0022 state 5 — WHERE "Open MO" GOES when access is revoked.
         The revoked window has to name the one action that fixes it, and by then the fetch has no
         token and the rows have no `return_url` to derive an origin from. So the address travels
         the same zero-dep query mechanism `upd`/`portal` already use, from the memo main has held
@@ -660,23 +605,15 @@ function openWorklistWindow(worklist, focusFilingId) {
         needs at BIRTH, not a question it asks later.
       */
       ...(installPageUrl ? { install: installPageUrl } : {}),
-      // The tenant, the same way and for the same reason: the name labels that button ("Open
-      // web app" when absent); the key prefixes the villa portal partitions. Both are already
-      // normalised; the window still writes the name with textContent only.
-      ...(tenantName ? { tenant: tenantName } : {}),
-      ...(tenantKey ? { tenant_key: tenantKey } : {}),
       // Layer 1's verdict, already compared in the main process — the renderer only paints it.
       ...(latestKnownVersion ? { upd: latestKnownVersion, cur: app.getVersion() } : {}),
     },
   });
-  const wcId = win.webContents.id;
-  if (tenantKey) windowTenantKeys.set(wcId, tenantKey);
-  win.on('closed', () => windowTenantKeys.delete(wcId));
   win.focus();
 }
 
 /**
- * 🔴 Громкий отказ (TM30-014 §7.9).
+ * 🔴 Громкий отказ (MO-TM30-014 §7.9).
  *
  * Раньше любой неразобранный payload превращался в `null` и молча открывал chooser —
  * сломанная ссылка выглядела как рабочая. Теперь битая ссылка показывает НАТИВНОЕ окно
@@ -897,13 +834,13 @@ ipcMain.handle('tm30:reset-portal-session', async (_event, partition) => {
 });
 
 /**
- * T3-08: ⇥ insert — скачивание листа в per-task каталог ({userData}/tm30-sheets/[{tenant_key}/]{filing_id}/)
+ * T3-08: ⇥ insert — скачивание листа в per-task каталог ({userData}/tm30-sheets/{filing_id}/)
  * + программная подстановка файла в input[type=file] портальной webview (CDP primary, in-page
  * fallback, read-back verification). Весь движок живёт в ./insert-sheet.js, чтобы insert-харнесс
  * (который, как и autofill-харнесс, бутается САМ вместо main.js) регистрировал ТОТ ЖЕ
  * production-обработчик, а не дрейфующую копию.
  */
-registerInsertSheet({ tenantKeyFor: tenantKeyForSender });
+registerInsertSheet();
 
 /** 📁 — отдаём ссылку настоящему браузеру человека. Открыть браузер ≠ сетевой вызов хелпера. */
 /**
@@ -1150,8 +1087,6 @@ module.exports = {
     reportUrl = null;
     reportToken = null;
     apiBase = null;
-    tenantName = null;
-    tenantKey = null;
     reportedThisLaunch = null;
   },
 };

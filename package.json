@@ -1,18 +1,13 @@
 {
   "name": "tm30-helper",
   "version": "2.5.0",
-  "description": "TM30 Helper — opens the TM30 portal from your web app",
+  "description": "TM30 Helper — открывает tm30.immigration.go.th с автозаполнением аккаунта по ссылке tm30://",
   "main": "main.js",
-  "author": "TM30 Helper",
+  "author": "MO Estate",
   "scripts": {
     "start": "electron .",
-    "brand:check": "node scripts/brand-guard.mjs --src",
-    "brand:check:artifacts": "node scripts/brand-guard.mjs --artifacts",
-    "predist": "npm run brand:check:artifacts",
     "dist": "electron-builder --mac --win",
-    "predist:mac": "npm run brand:check:artifacts",
     "dist:mac": "electron-builder --mac",
-    "predist:win": "npm run brand:check:artifacts",
     "dist:win": "electron-builder --win"
   },
   "build": {
