@@ -105,7 +105,7 @@ const trimSlashes = (s) => String(s).replace(/\/+$/, '');
  *
  * 🔴 THE CONSUMER HALF OF THE `c=` GUARD, which was missing until 2026-08-10.
  *
- * The emitter (`mo-reservation-fe/src/lib/tm30.ts` `tm30PayloadDigest`) has appended `&c=` to
+ * The emitter (the web app's `src/lib/tm30.ts` `tm30PayloadDigest`) has appended `&c=` to
  * every worklist link for as long as the digest has existed, and its docblock says exactly why:
  * the base64 round-trip below catches TRUNCATION but not SUBSTITUTION. Swapping one valid base64
  * character for another round-trips cleanly and very often still parses as JSON — measured there
@@ -346,7 +346,7 @@ function normalizeTenantKey(raw) {
  */
 function applyOptionalKeys(result, payload) {
     /**
-     * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
+     * TM30-HELPER-VERSIONING §5 Layer 2 — the floor THIS link needs.
      *
      * Expresses what Layer 1's "is there a newer release" cannot: *this particular link
      * requires ≥ X*. That is the honest signal when the web app has just started sending a
