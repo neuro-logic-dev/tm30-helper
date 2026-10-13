@@ -46,6 +46,8 @@ const { app, ipcMain, session, webContents } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+const { normalizeTenantKey } = require('./deeplink');
+
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 /** B ships base64 into the page — refuse anything bigger than this instead (contract cap). */
 const INPAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -184,7 +186,9 @@ function findVillaWebview(sender, partition) {
 }
 
 /**
- * Download the row's sheet to ITS OWN directory: {userData}/tm30-sheets/{filing_id}/{name}.
+ * Download the row's sheet to ITS OWN directory: {userData}/tm30-sheets/{filing_id}/{name}, or
+ * {userData}/tm30-sheets/{tenant_key}/{filing_id}/{name} when the calling window belongs to a
+ * keyed tenant — filing ids are per-backend, so two tenants can both have filing 1842.
  * The dir is emptied first, so it only ever holds the LAST downloaded copy — stale sheets are
  * overwritten, never deduped into "name (1).xlsx" (the exact ambiguity this feature removes).
  * ~/Downloads and the plain ⬇ button are untouched.
@@ -193,8 +197,11 @@ function findVillaWebview(sender, partition) {
  * addition: the listener only claims items whose URL chain starts at OUR url, so an insert
  * cannot hijack a plain download the operator started in the same window a moment earlier.
  */
-function downloadToTaskDir(sender, rawUrl, filingId) {
-  const dir = path.join(app.getPath('userData'), 'tm30-sheets', String(filingId));
+function downloadToTaskDir(sender, rawUrl, filingId, tenantKey) {
+  const root = path.join(app.getPath('userData'), 'tm30-sheets');
+  const dir = tenantKey
+    ? path.join(root, tenantKey, String(filingId))
+    : path.join(root, String(filingId));
   try {
     fs.mkdirSync(dir, { recursive: true });
     for (const f of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, f));
@@ -311,8 +318,13 @@ function describeSnapshot(v) {
 /** In-flight inserts, keyed by target webContents id — one insert per portal pane at a time. */
 const inflight = new Set();
 
-async function handleInsertSheet(event, req) {
+async function handleInsertSheet(tenantKeyFor, event, req) {
   const fail = (stage, error, extra) => ({ ok: false, stage, error, ...extra });
+
+  // The calling window's tenant key, as main recorded it at the window's birth. Re-checked with
+  // the parser's own rule: it becomes a path segment below. No key ⇒ the pre-tenant layout.
+  const tenantKey = normalizeTenantKey(tenantKeyFor ? tenantKeyFor(event.sender) : null);
+  const partitionPrefix = tenantKey ? 'persist:tm30-' + tenantKey + '-v-' : 'persist:tm30-v-';
 
   // ── request validation: ONLY row-derived data, every field re-checked here ──────────────
   const filingId = req && req.filing_id;
@@ -320,7 +332,7 @@ async function handleInsertSheet(event, req) {
   const partition = req && req.partition;
   if (!Number.isFinite(filingId)) return fail('request', 'filing_id is not a number');
   if (!isHttpUrl(rawUrl)) return fail('request', 'sheet url is not an http(s) url');
-  if (typeof partition !== 'string' || !partition.startsWith('persist:tm30-v-')) {
+  if (typeof partition !== 'string' || !partition.startsWith(partitionPrefix)) {
     return fail('request', 'not a tm30 villa partition');
   }
 
@@ -336,7 +348,7 @@ async function handleInsertSheet(event, req) {
   }
   inflight.add(target.id);
   try {
-    return await runInsert(event.sender, target, filingId, String(rawUrl));
+    return await runInsert(event.sender, target, filingId, String(rawUrl), tenantKey);
   } catch (err) {
     return fail('internal', errMsg(err));
   } finally {
@@ -344,11 +356,11 @@ async function handleInsertSheet(event, req) {
   }
 }
 
-async function runInsert(sender, target, filingId, rawUrl) {
+async function runInsert(sender, target, filingId, rawUrl, tenantKey) {
   const fail = (stage, error, extra) => ({ ok: false, stage, error, ...extra });
 
   // 1 · the per-task download — the file's identity comes from the ROW, nothing else.
-  const dl = await downloadToTaskDir(sender, rawUrl, filingId);
+  const dl = await downloadToTaskDir(sender, rawUrl, filingId, tenantKey);
   if (!dl.ok) return fail('download', 'sheet download failed — ' + dl.error);
   const expect = { name: dl.filename, size: fs.statSync(dl.path).size };
 
@@ -435,9 +447,14 @@ async function runInsert(sender, target, filingId, rawUrl) {
     { fellBack });
 }
 
-/** Registered by main.js AND by the insert harness — both run this exact production handler. */
-function registerInsertSheet() {
-  ipcMain.handle('tm30:insert-sheet', handleInsertSheet);
+/**
+ * Registered by main.js AND by the insert harness — both run this exact production handler.
+ *
+ * `tenantKeyFor(sender)` → the calling window's tenant key or null. main.js passes it; the
+ * harness passes nothing, which is the keyless layout every existing scenario was written for.
+ */
+function registerInsertSheet({ tenantKeyFor } = {}) {
+  ipcMain.handle('tm30:insert-sheet', (event, req) => handleInsertSheet(tenantKeyFor, event, req));
 }
 
 module.exports = { registerInsertSheet };
