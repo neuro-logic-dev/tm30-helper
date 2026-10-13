@@ -37,7 +37,7 @@ if (process.defaultApp) {
 // ---------- Разбор deep link ----------
 // Формат: tm30://open?d=<base64url(JSON)>
 //   v1: {name, login, pass}          — legacy, поведение не менялось
-//   v2: {v:2, worklist:[...]}        — MO-TM30-014 §7.3
+//   v2: {v:2, worklist:[...]}        — TM30-014 §7.3
 //   v3: {v:3, rows:[...], villas, *_base} — ADR-0015, the compact shape. Normalised to the
 //       SAME rows by deeplink.js, so nothing below this line can tell the two apart.
 // Сам парсер живёт в ./deeplink.js — без зависимости от electron, чтобы его
@@ -141,7 +141,7 @@ function broadcastUpdateNotice() {
  * worklist приходит по HTTPS через `queue-client.js` уже после того, как окно открылось.
  */
 /**
- * MO-TM30-HELPER-VERSIONING §5 Layer 1 — "is there a newer release", asked once at startup.
+ * TM30-HELPER-VERSIONING §5 Layer 1 — "is there a newer release", asked once at startup.
  *
  * 🔴 WHY THIS EXISTS AT ALL, given the Helper auto-updates. It auto-updates on WINDOWS.
  * `build.mac.identity` is null, `build.mac.target` is dmg-only (electron-updater cannot update
@@ -320,7 +320,7 @@ function deriveInstallPage(worklist) {
  *  2. **A row's `sheet_download_url` gives it away.** That is what makes a v2/v3 link BOOTSTRAP
  *     material rather than merely a snapshot (AC-14): the deployment that BUILT the sheet URL is
  *     the one asked to answer for the queue. It is byte-for-byte the emitter's own rule
- *     (`resolveApiBase`, `mo-reservation-fe/src/lib/tm30.ts`), which is also how v3's `api_base`
+ *     (`resolveApiBase` in the web app's `src/lib/tm30.ts`), which is also how v3's `api_base`
  *     header is computed in the first place — so an origin derived here equals the header a v3
  *     payload carries, and nothing is lost by reading the rows instead of the header.
  *
@@ -572,7 +572,7 @@ function discardReportToken() {
 }
 
 /**
- * MO-TM30-HELPER-VERSIONING §5 Layer 2 — the per-link floor. BLOCKING.
+ * TM30-HELPER-VERSIONING §5 Layer 2 — the per-link floor. BLOCKING.
  *
  * Needs no network, which is the point: it answers "can this Helper honour THIS link" from the
  * link itself. Opening the worklist anyway would show a queue built by a payload this build only
@@ -676,7 +676,7 @@ function openWorklistWindow(worklist, focusFilingId) {
 }
 
 /**
- * 🔴 Громкий отказ (MO-TM30-014 §7.9).
+ * 🔴 Громкий отказ (TM30-014 §7.9).
  *
  * Раньше любой неразобранный payload превращался в `null` и молча открывал chooser —
  * сломанная ссылка выглядела как рабочая. Теперь битая ссылка показывает НАТИВНОЕ окно

@@ -16,7 +16,7 @@
 # test therefore leaves no orphan version bump and no dangling tag behind.
 #
 # The release is created ONCE with BOTH installers attached, rather than by two racing per-OS
-# jobs. `/tm30-helper` in mo-reservation-fe downloads from `releases/latest/download/`, so a
+# jobs. `/tm30-helper` in the web app downloads from `releases/latest/download/`, so a
 # release that exists with only half its assets is a live 404 for whoever clicks meanwhile.
 #
 name: release
@@ -161,6 +161,13 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      # Brand leak guard (ADR-0031) over exactly the files electron-builder packs into app.asar,
+      # right before they are packed. No skip input exists, on purpose: a false positive is fixed
+      # with an allowlist entry in brand-guard.json, never by bypassing this step.
+      - name: Brand leak guard (app.asar files)
+        shell: bash
+        run: npm run brand:check:artifacts
+
       # `--publish never` is load-bearing. `build.publish` in package.json is what tells the
       # SHIPPED app where its update feed lives, so it cannot be removed — but electron-builder
       # reads the same block at build time, detects CI, and tries to upload the artifacts
@@ -271,7 +278,7 @@ jobs:
           git add package.json package-lock.json
           # The bump may already be in the tree, and that is legitimate — not a mistake to guard
           # against. A version can be part of the SOURCE rather than release metadata: since
-          # MO-TM30-QUEUE, `test/roundtrip.test.mjs` asserts that the shipped version clears the
+          # TM30-QUEUE, `test/roundtrip.test.mjs` asserts that the shipped version clears the
           # floor a v4 deep link demands, so the bump has to land on the branch for the suite to
           # be green BEFORE the release runs. With `set -e`, an unconditional `git commit` on a
           # clean tree exits 1 and kills the release after both installers have already built —
